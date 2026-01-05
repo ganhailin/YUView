@@ -126,6 +126,8 @@ PixelFormatYUV::PixelFormatYUV(const std::string &name)
   {
     if (*predefinedFormat == PredefinedPixelFormat::V210)
       this->predefinedPixelFormat = predefinedFormat;
+    else if (*predefinedFormat == PredefinedPixelFormat::NV15)
+      this->predefinedPixelFormat = predefinedFormat;
   }
 
   std::regex strExpr(
@@ -378,6 +380,12 @@ int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize) const
       auto roundedUpWidth = (((frameSize.width + 48 - 1) / 48) * 48);
       return frameSize.height * roundedUpWidth * 16 / 6;
     }
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+    {
+      auto roundedUpWidth = (((frameSize.width + 4 - 1) / 4) * 4);
+      auto roundedUpHeight = (((frameSize.height + 2 -1) / 2) * 2);
+      return (roundedUpHeight+roundedUpHeight/2) * (roundedUpWidth /4 *5);
+    }
     return -1;
   }
 
@@ -465,6 +473,8 @@ std::string PixelFormatYUV::getName() const
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return "V210";
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return "NV15";
     return "Invalid";
   }
 
@@ -505,6 +515,8 @@ unsigned PixelFormatYUV::getNrPlanes() const
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return 3;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return 2;
     return 0;
   }
 
@@ -522,6 +534,8 @@ Subsampling PixelFormatYUV::getSubsampling() const
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return Subsampling::YUV_422;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return Subsampling::YUV_420;
     return Subsampling::UNKNOWN;
   }
 
@@ -573,6 +587,8 @@ unsigned PixelFormatYUV::getBitsPerSample() const
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return 10;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return 10;
     return 0;
   }
 
@@ -584,6 +600,8 @@ bool PixelFormatYUV::isBigEndian() const
   if (this->predefinedPixelFormat)
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return false;
     return false;
   }
@@ -597,6 +615,8 @@ bool PixelFormatYUV::isPlanar() const
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return false;
     return false;
   }
 
@@ -608,6 +628,8 @@ bool PixelFormatYUV::hasAlpha() const
   if (this->predefinedPixelFormat)
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return false;
     return false;
   }
@@ -625,6 +647,8 @@ Offset PixelFormatYUV::getChromaOffset() const
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return Offset({0, 0});
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return Offset({0, 0});
     return Offset({0, 0});
   }
 
@@ -636,6 +660,8 @@ bool PixelFormatYUV::isBytePacking() const
   if (this->predefinedPixelFormat)
   {
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
+      return true;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return true;
     return false;
   }

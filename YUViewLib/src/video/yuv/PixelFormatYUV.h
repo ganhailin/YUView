@@ -110,11 +110,15 @@ enum class PredefinedPixelFormat
 {
   // https://developer.apple.com/library/archive/technotes/tn2162/_index.html#//apple_ref/doc/uid/DTS40013070-CH1-TNTAG8-V210__4_2_2_COMPRESSION_TYPE
   // Packed 422 format with 12 10 bit values in 16 bytes
-  V210
+  V210,
+  // Two Plane UV Interleaved 420 format with 4 10 bit values in 5 bytes form rockchip
+  NV15
 };
 
-constexpr EnumMapper<PredefinedPixelFormat, 1> PredefinedPixelFormatMapper = {
-    std::make_pair(PredefinedPixelFormat::V210, "V210")};
+constexpr EnumMapper<PredefinedPixelFormat, 2> PredefinedPixelFormatMapper = {
+    std::make_pair(PredefinedPixelFormat::V210, "V210"),
+    std::make_pair(PredefinedPixelFormat::NV15, "NV15")
+};
 
 enum class PackingOrder
 {

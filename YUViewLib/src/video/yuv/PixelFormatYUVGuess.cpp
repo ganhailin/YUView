@@ -177,11 +177,21 @@ PixelFormatYUV testFormatFromSizeAndNamePacked(const std::string            &nam
                                                const std::optional<int64_t> &fileSize)
 {
   // Check V210
-  std::regex  strExpr("(?:_|\\.|-)(v210|V210)(?:_|\\.|-)");
-  std::smatch sm;
-  if (std::regex_search(name, sm, strExpr))
+  std::regex  strExpr_v210("(?:_|\\.|-)(v210|V210)(?:_|\\.|-)");
+  std::smatch sm_v210;
+  if (std::regex_search(name, sm_v210, strExpr_v210))
   {
     const auto fmt = PixelFormatYUV(PredefinedPixelFormat::V210);
+    if (doesPixelFormatMatchFileSize(fmt, *guessedFrameFormat.frameSize, fileSize))
+      return fmt;
+  }
+
+  // Check NV15
+  std::regex  strExpr_nv15("(?:_|\\.|-)(nv15|NV15)(?:_|\\.|-)");
+  std::smatch sm_nv15;
+  if (std::regex_search(name, sm_nv15, strExpr_nv15))
+  {
+    const auto fmt = PixelFormatYUV(PredefinedPixelFormat::NV15);
     if (doesPixelFormatMatchFileSize(fmt, *guessedFrameFormat.frameSize, fileSize))
       return fmt;
   }
@@ -253,6 +263,13 @@ checkSpecificFileExtensions(const GuessedFrameFormat &guessedFrameFormat,
     const auto v210Format = PixelFormatYUV(PredefinedPixelFormat::V210);
     if (doesPixelFormatMatchFileSize(v210Format, *guessedFrameFormat.frameSize, fileInfo.fileSize))
       return v210Format;
+  }
+
+  if (fileExtension == ".nv15" || fileExtension == ".NV15")
+  {
+    const auto nv15Format = PixelFormatYUV(PredefinedPixelFormat::NV15);
+    if (doesPixelFormatMatchFileSize(nv15Format, *guessedFrameFormat.frameSize, fileInfo.fileSize))
+      return nv15Format;
   }
 
   return {};

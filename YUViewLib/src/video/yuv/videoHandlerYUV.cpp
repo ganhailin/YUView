@@ -381,6 +381,91 @@ std::pair<bool, PixelFormatYUV> convertV210PackedToPlanar(const QByteArray &sour
   return {true, newFormat};
 }
 
+static inline void Unpack4x10(const uint8_t *src, uint16_t *dst)
+{
+  dst[0] = ((src[0] >> 0) & 0xFF) | ((src[1] & 0x03) << 8); // 8+2
+  dst[1] = ((src[1] >> 2) & 0x3F) | ((src[2] & 0x0F) << 6); // 6+4
+  dst[2] = ((src[2] >> 4) & 0x0F) | ((src[3] & 0x3F) << 4); // 4+6
+  dst[3] = ((src[3] >> 6) & 0x0F) | ((src[4] & 0xFF) << 2); // 2+8
+}
+
+void NV15PackedToYUV420P16(const uint8_t *src,
+                           int            width,
+                           int            height,
+                           int            y_stride_bytes,
+                           int            uv_stride_bytes,
+                           uint16_t      *dst_y,
+                           uint16_t      *dst_u,
+                           uint16_t      *dst_v)
+{
+  // ---------- Y plane ----------
+  const uint8_t *src_y = src;
+
+  for (int y = 0; y < height; ++y)
+  {
+    const uint8_t *row = src_y + y * y_stride_bytes;
+    uint16_t      *out = dst_y + y * width;
+
+    int x = 0;
+    for (; x + 3 < width; x += 4)
+    {
+      Unpack4x10(row + (x * 5) / 4, out + x);
+    }
+  }
+
+  // ---------- UV plane ----------
+  const uint8_t *src_uv = src + y_stride_bytes * height;
+
+  const int cw = width >> 1;
+  const int ch = height >> 1;
+
+  for (int y = 0; y < ch; ++y)
+  {
+    const uint8_t *row   = src_uv + y * uv_stride_bytes;
+    uint16_t      *out_u = dst_u + y * cw;
+    uint16_t      *out_v = dst_v + y * cw;
+
+    int x = 0;
+    for (; x + 1 < cw; x += 2)
+    {
+      uint16_t uv[4];
+      Unpack4x10(row + (x * 5) / 2, uv);
+      // uv[] = U0 V0 U1 V1
+      out_u[x + 0] = uv[0];
+      out_v[x + 0] = uv[1];
+      out_u[x + 1] = uv[2];
+      out_v[x + 1] = uv[3];
+    }
+  }
+}
+
+std::pair<bool, PixelFormatYUV> convertNV15PackedToPlanar(const QByteArray &sourceBuffer,
+                                                          QByteArray       &targetBuffer,
+                                                          const Size        curFrameSize)
+{
+
+  // The output format is 420 10 bit planar
+  auto       newFormat        = PixelFormatYUV(Subsampling::YUV_420, 10, PlaneOrder::YUV);
+  const auto bytesPerOutFrame = newFormat.bytesPerFrame(curFrameSize);
+  if (targetBuffer.size() < bytesPerOutFrame)
+    targetBuffer.resize(bytesPerOutFrame);
+
+  const auto w = curFrameSize.width;
+  const auto h = curFrameSize.height;
+
+  auto widthRoundUp = (((w + 4 - 1) / 4) * 4);
+  auto strideIn     = widthRoundUp / 4 * 5;
+
+  const unsigned char *restrict src = (unsigned char *)sourceBuffer.data();
+  unsigned short *restrict dstY     = (unsigned short *)targetBuffer.data();
+  unsigned short *restrict dstU     = dstY + w * h;
+  unsigned short *restrict dstV     = dstU + (w / 2) * (h / 2);
+
+  NV15PackedToYUV420P16(src, w, h, strideIn, strideIn, dstY, dstU, dstV);
+
+  return {true, newFormat};
+}
+
 yuv_t getPixelValueV210(const QByteArray &sourceBuffer,
                         const Size       &curFrameSize,
                         const QPoint     &pixelPos)
@@ -423,6 +508,102 @@ yuv_t getPixelValueV210(const QByteArray &sourceBuffer,
     ret.V =
         ((src[startInBuffer + 12 + 1] >> 2) & 0x3f) + ((src[startInBuffer + 12 + 2] & 0x0f) << 6);
   }
+
+  return ret;
+}
+
+static inline uint16_t Unpack10At(const uint8_t *src, // 指向 5-byte group
+                                  int            idx  // 0..3
+)
+{
+  switch (idx)
+  {
+  case 0:
+    // ((src[0] >> 0) & 0xFF) | ((src[1] & 0x03) << 8)
+    return (uint16_t)(src[0] | ((src[1] & 0x03) << 8));
+
+  case 1:
+    // ((src[1] >> 2) & 0x3F) | ((src[2] & 0x0F) << 6)
+    return (uint16_t)(((src[1] >> 2) & 0x3F) | ((src[2] & 0x0F) << 6));
+
+  case 2:
+    // ((src[2] >> 4) & 0x0F) | ((src[3] & 0x3F) << 4)
+    return (uint16_t)(((src[2] >> 4) & 0x0F) | ((src[3] & 0x3F) << 4));
+
+  case 3:
+    // ((src[3] >> 6) & 0x03) | ((src[4] & 0xFF) << 2)
+    return (uint16_t)(((src[3] >> 6) & 0x03) | (src[4] << 2));
+
+  default:
+    return 0;
+  }
+}
+
+bool NV15PackedGetPixelYUV(const uint8_t *nv15,
+                           int            width,
+                           int            height,
+                           int            y_stride_bytes,
+                           int            uv_stride_bytes,
+                           int            x,
+                           int            y,
+                           uint16_t      *out_y,
+                           uint16_t      *out_u,
+                           uint16_t      *out_v)
+{
+  if (!nv15 || !out_y || !out_u || !out_v)
+    return false;
+
+  if (x < 0 || x >= width || y < 0 || y >= height)
+    return false;
+
+  // ---------------- Y ----------------
+  const uint8_t *y_plane = nv15;
+
+  int y_group = x >> 2; // x / 4
+  int y_index = x & 3;  // x % 4
+
+  const uint8_t *y_ptr = y_plane + y * y_stride_bytes + y_group * 5;
+
+  *out_y = Unpack10At(y_ptr, y_index);
+
+  // ---------------- UV ----------------
+  const uint8_t *uv_plane = nv15 + y_stride_bytes * height;
+
+  int cx = x >> 1;
+  int cy = y >> 1;
+
+  int uv_group = (cx >> 1);    // 2 chroma per group
+  int uv_index = (cx & 1) * 2; // 0 or 2 → U/V slot
+
+  const uint8_t *uv_ptr = uv_plane + cy * uv_stride_bytes + uv_group * 5;
+
+  uint16_t uv0 = Unpack10At(uv_ptr, uv_index + 0);
+  uint16_t uv1 = Unpack10At(uv_ptr, uv_index + 1);
+
+  *out_u = uv0;
+  *out_v = uv1;
+
+  return true;
+}
+
+yuv_t getPixelValueNV15(const QByteArray &sourceBuffer,
+                        const Size       &curFrameSize,
+                        const QPoint     &pixelPos)
+{
+  const auto w = curFrameSize.width;
+  const auto h = curFrameSize.height;
+
+  auto widthRoundUp = (((w + 4 - 1) / 4) * 4);
+  auto strideIn     = widthRoundUp / 4 * 5;
+
+  const unsigned char *restrict src = (unsigned char *)sourceBuffer.data();
+
+  uint16_t out_y = 0, out_u = 0, out_v = 0;
+
+  NV15PackedGetPixelYUV(
+    src, w, h, strideIn, strideIn, pixelPos.x(), pixelPos.y(), &out_y, &out_u, &out_v);
+
+  yuv_t ret = {out_y, out_u, out_v};
 
   return ret;
 }
@@ -2358,6 +2539,9 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
       if (*predefinedFormat == PredefinedPixelFormat::V210)
         std::tie(convOK, newPixelFormat) =
             convertV210PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize);
+      else if (*predefinedFormat == PredefinedPixelFormat::NV15)
+        std::tie(convOK, newPixelFormat) =
+          convertNV15PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize);
       else
         convOK = false;
     }
@@ -2392,7 +2576,9 @@ std::vector<PixelFormatYUV> videoHandlerYUV::formatPresetList = {
     PixelFormatYUV(Subsampling::YUV_420, 10, PlaneOrder::YUV),
     PixelFormatYUV(Subsampling::YUV_422, 8, PlaneOrder::YUV),
     PixelFormatYUV(Subsampling::YUV_444, 8, PlaneOrder::YUV),
-    PixelFormatYUV(PredefinedPixelFormat::V210)};
+    PixelFormatYUV(PredefinedPixelFormat::V210),
+    PixelFormatYUV(PredefinedPixelFormat::NV15),
+};
 
 videoHandlerYUV::videoHandlerYUV() : videoHandler()
 {
@@ -3295,6 +3481,8 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
   {
     if (predefinedFormat == PredefinedPixelFormat::V210)
       value = getPixelValueV210(currentFrameRawData, frameSize, pixelPos);
+    else if (predefinedFormat == PredefinedPixelFormat::NV15)
+      value = getPixelValueNV15(currentFrameRawData, frameSize, pixelPos);
   }
   else if (format.isPlanar())
   {
