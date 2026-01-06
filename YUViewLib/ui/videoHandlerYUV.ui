@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>216</width>
-    <height>230</height>
+    <width>246</width>
+    <height>310</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -128,30 +128,10 @@
      </item>
      <item>
       <layout class="QGridLayout" name="gridLayout" columnstretch="0,1">
-       <item row="1" column="1">
-        <widget class="QComboBox" name="colorComponentsComboBox">
+       <item row="3" column="1">
+        <widget class="QComboBox" name="colorConversionComboBox">
          <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Which of the YUV components should be displayed? You can choose all or the luma or one of the color planes individually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="label_2">
-         <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If the color components are subsampled, how should interpolation to the full resolution be performed?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-         <property name="text">
-          <string>Chroma Interpolation</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QLabel" name="label">
-         <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Which of the YUV components should be displayed? You can choose all or the luma or one of the color planes individually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-         <property name="text">
-          <string>Color Components</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How to convert YUV to RGB. Several ITU recommendations are selectable.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
         </widget>
        </item>
@@ -172,10 +152,13 @@
          </property>
         </widget>
        </item>
-       <item row="3" column="1">
-        <widget class="QComboBox" name="colorConversionComboBox">
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_2">
          <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How to convert YUV to RGB. Several ITU recommendations are selectable.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If the color components are subsampled, how should interpolation to the full resolution be performed?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="text">
+          <string>Chroma Interpolation</string>
          </property>
         </widget>
        </item>
@@ -189,12 +172,39 @@
          </property>
         </widget>
        </item>
+       <item row="1" column="1">
+        <widget class="QComboBox" name="colorComponentsComboBox">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Which of the YUV components should be displayed? You can choose all or the luma or one of the color planes individually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+        </widget>
+       </item>
        <item row="0" column="1">
         <widget class="QComboBox" name="yuvFormatComboBox">
          <property name="toolTip">
           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;What is the source format of the YUV file? E.g: The subsampling and bit depth. Select one of the predefined formats or select 'custom...' to define a custom format.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
         </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="label">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Which of the YUV components should be displayed? You can choose all or the luma or one of the color planes individually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="text">
+          <string>Color Components</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <widget class="QLabel" name="label_9">
+         <property name="text">
+          <string>Byte Stride</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="1">
+        <widget class="QSpinBox" name="byteStrideSpinBox"/>
        </item>
       </layout>
      </item>

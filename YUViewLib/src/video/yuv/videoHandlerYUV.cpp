@@ -439,24 +439,43 @@ void NV15PackedToYUV420P16(const uint8_t *src,
   }
 }
 
-std::pair<bool, PixelFormatYUV> convertNV15PackedToPlanar(const QByteArray &sourceBuffer,
-                                                          QByteArray       &targetBuffer,
-                                                          const Size        curFrameSize)
+std::pair<bool, PixelFormatYUV>
+convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
+                          QByteArray               &targetBuffer,
+                          const Size                curFrameSize,
+                          const ConversionSettings &conversionSettings)
 {
 
   // The output format is 420 10 bit planar
-  auto       newFormat        = PixelFormatYUV(Subsampling::YUV_420, 10, PlaneOrder::YUV);
-  const auto bytesPerOutFrame = newFormat.bytesPerFrame(curFrameSize);
-  if (targetBuffer.size() < bytesPerOutFrame)
-    targetBuffer.resize(bytesPerOutFrame);
+  auto newFormat = PixelFormatYUV(Subsampling::YUV_420, 10, PlaneOrder::YUV);
 
   const auto w = curFrameSize.width;
   const auto h = curFrameSize.height;
 
-  auto widthRoundUp = (((w + 4 - 1) / 4) * 4);
-  auto strideIn     = widthRoundUp / 4 * 5;
+  auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
+  auto heightRoundUp = (((w + 2 - 1) / 2) * 2);
+  auto strideIn      = widthRoundUp / 4 * 5;
 
-  const unsigned char *restrict src = (unsigned char *)sourceBuffer.data();
+  if (conversionSettings.byteStride > 0 && conversionSettings.byteStride > strideIn)
+    strideIn = conversionSettings.byteStride;
+
+  int        totalSize = strideIn * heightRoundUp / 2 * 3;
+  QByteArray copy_data;
+  bool       use_copy = false;
+
+  if (sourceBuffer.size() < totalSize)
+  {
+    copy_data.append(sourceBuffer);
+    copy_data.resize(totalSize);
+    use_copy = true;
+  }
+
+  const auto bytesPerOutFrame = newFormat.bytesPerFrame({widthRoundUp, heightRoundUp});
+  if (targetBuffer.size() < bytesPerOutFrame)
+    targetBuffer.resize(bytesPerOutFrame);
+
+  const unsigned char *restrict src =
+    use_copy ? (unsigned char *)sourceBuffer.data() : (unsigned char *)copy_data.data();
   unsigned short *restrict dstY     = (unsigned short *)targetBuffer.data();
   unsigned short *restrict dstU     = dstY + w * h;
   unsigned short *restrict dstV     = dstU + (w / 2) * (h / 2);
@@ -2541,7 +2560,7 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
             convertV210PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize);
       else if (*predefinedFormat == PredefinedPixelFormat::NV15)
         std::tie(convOK, newPixelFormat) =
-          convertNV15PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize);
+            convertNV15PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize, conversionSettings);
       else
         convOK = false;
     }
@@ -2606,6 +2625,14 @@ unsigned videoHandlerYUV::getCachingFrameSize() const
 void videoHandlerYUV::loadValues(Size newFramesize, const QString &)
 {
   this->setFrameSize(newFramesize);
+  if (ui.created())
+  {
+    if (auto predefinedFormat = srcPixelFormat.getPredefinedFormat())
+    {
+      if (predefinedFormat == PredefinedPixelFormat::NV15)
+        ui.byteStrideSpinBox->setValue((newFramesize.width + 3) / 4 * 5);
+    }
+  }
 }
 
 void videoHandlerYUV::drawFrame(QPainter *painter,
@@ -2701,6 +2728,8 @@ QLayout *videoHandlerYUV::createVideoHandlerControls(bool isSizeAndFormatFixed)
       this->conversionSettings.mathParameters[Component::Chroma].offset);
   ui.chromaInvertCheckBox->setChecked(
       this->conversionSettings.mathParameters[Component::Chroma].invert);
+  ui.byteStrideSpinBox->setMinimum(0);
+  ui.byteStrideSpinBox->setMaximum(1000000);
 
   // Connect all the change signals from the controls to "connectWidgetSignals()"
   connect(ui.yuvFormatComboBox,
@@ -2741,6 +2770,10 @@ QLayout *videoHandlerYUV::createVideoHandlerControls(bool isSizeAndFormatFixed)
           &videoHandlerYUV::slotYUVControlChanged);
   connect(ui.chromaInvertCheckBox,
           &QCheckBox::stateChanged,
+          this,
+          &videoHandlerYUV::slotYUVControlChanged);
+  connect(ui.byteStrideSpinBox,
+          QOverload<int>::of(&QSpinBox::valueChanged),
           this,
           &videoHandlerYUV::slotYUVControlChanged);
 
@@ -2818,6 +2851,14 @@ void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
     ui.lumaOffsetSpinBox->setValue(this->conversionSettings.mathParameters[Component::Luma].offset);
     ui.chromaOffsetSpinBox->setValue(
         this->conversionSettings.mathParameters[Component::Chroma].offset);
+    if (ui.created())
+    {
+      if (auto predefinedFormat = srcPixelFormat.getPredefinedFormat())
+      {
+        if (predefinedFormat == PredefinedPixelFormat::NV15)
+          ui.byteStrideSpinBox->setValue((frameSize.width + 3) / 4 * 5);
+      }
+    }
   }
 
   if (emitSignal)
@@ -2846,7 +2887,7 @@ void videoHandlerYUV::slotYUVControlChanged()
       sender == ui.colorConversionComboBox || sender == ui.lumaScaleSpinBox ||
       sender == ui.lumaOffsetSpinBox || sender == ui.lumaInvertCheckBox ||
       sender == ui.chromaScaleSpinBox || sender == ui.chromaOffsetSpinBox ||
-      sender == ui.chromaInvertCheckBox)
+      sender == ui.chromaInvertCheckBox || sender == ui.byteStrideSpinBox)
   {
     this->conversionSettings.chromaInterpolation =
         *ChromaInterpolationMapper.getValueAt(ui.chromaInterpolationComboBox->currentIndex());
@@ -2865,6 +2906,7 @@ void videoHandlerYUV::slotYUVControlChanged()
         ui.chromaOffsetSpinBox->value();
     this->conversionSettings.mathParameters[Component::Chroma].invert =
         ui.chromaInvertCheckBox->isChecked();
+    this->conversionSettings.byteStride = ui.byteStrideSpinBox->value();
 
     // Set the current frame in the buffer to be invalid and clear the cache.
     // Emit that this item needs redraw and the cache needs updating.

@@ -70,6 +70,7 @@ struct ConversionSettings
   // Parameters for the YUV transformation (like scaling, invert, offset). For Luma ([0]) and
   // chroma([1]).
   std::map<Component, MathParameters> mathParameters;
+  int byteStride;
 };
 
 /** The videoHandlerYUV can be used in any playlistItem to read/display YUV data. A playlistItem
