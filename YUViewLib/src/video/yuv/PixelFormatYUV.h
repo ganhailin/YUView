@@ -216,7 +216,7 @@ public:
 
   bool        isValid() const;
   bool        canConvertToRGB(Size frameSize, std::string *whyNot = nullptr) const;
-  int64_t     bytesPerFrame(const Size &frameSize) const;
+  int64_t     bytesPerFrame(const Size &frameSize, int byteStride) const;
   std::string getName() const;
   unsigned    getNrPlanes() const;
   void        setDefaultChromaOffset();

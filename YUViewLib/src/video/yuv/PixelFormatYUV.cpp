@@ -369,7 +369,7 @@ bool PixelFormatYUV::canConvertToRGB(Size imageSize, std::string *whyNot) const
   return canConvert;
 }
 
-int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize) const
+int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize, int byteStride) const
 {
   if (this->predefinedPixelFormat)
   {
@@ -382,9 +382,13 @@ int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize) const
     }
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
     {
-      auto roundedUpWidth = (((frameSize.width + 4 - 1) / 4) * 4);
-      auto roundedUpHeight = (((frameSize.height + 2 -1) / 2) * 2);
-      return (roundedUpHeight+roundedUpHeight/2) * (roundedUpWidth /4 *5);
+      auto widthRoundUp  = (((frameSize.width + 4 - 1) / 4) * 4);
+      auto heightRoundUp = (((frameSize.height + 2 - 1) / 2) * 2);
+      auto strideIn      = widthRoundUp / 4 * 5;
+
+      if (byteStride > 0 && byteStride > strideIn)
+        strideIn = byteStride;
+      return strideIn * (heightRoundUp / 2 * 3);
     }
     return -1;
   }

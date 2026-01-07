@@ -170,7 +170,7 @@ std::pair<bool, PixelFormatYUV> convertYUVPackedToPlanar(const QByteArray     &s
       // Byte packing in 422 with 10 bit. So for each 2 pixels we have 4 10 bit values which
       // are exactly 5 bytes (40 bits).
       auto fmt        = PixelFormatYUV(Subsampling::YUV_422, 10, PlaneOrder::YUV);
-      auto outputSize = fmt.bytesPerFrame(curFrameSize);
+      auto outputSize = fmt.bytesPerFrame(curFrameSize, 0);
       if (targetBuffer.size() < outputSize)
         targetBuffer.resize(outputSize);
 
@@ -311,7 +311,7 @@ std::pair<bool, PixelFormatYUV> convertV210PackedToPlanar(const QByteArray &sour
 
   // The output format is 422 10 bit planar
   auto       newFormat        = PixelFormatYUV(Subsampling::YUV_422, 10, PlaneOrder::YUV);
-  const auto bytesPerOutFrame = newFormat.bytesPerFrame(curFrameSize);
+  const auto bytesPerOutFrame = newFormat.bytesPerFrame(curFrameSize, 0);
   if (targetBuffer.size() < bytesPerOutFrame)
     targetBuffer.resize(bytesPerOutFrame);
 
@@ -467,7 +467,9 @@ convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
 
   if (sourceBuffer.size() < totalSize)
   {
-    copyData.append(sourceBuffer);
+    copyData.resize(0);
+    copyData.squeeze();
+    copyData = sourceBuffer;
     copyData.resize(totalSize);
     use_copy = true;
   }
@@ -477,7 +479,7 @@ convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
     copyData.squeeze();
   }
 
-  const auto bytesPerOutFrame = newFormat.bytesPerFrame({widthRoundUp, heightRoundUp});
+  const auto bytesPerOutFrame = newFormat.bytesPerFrame({widthRoundUp, heightRoundUp}, 0);
   if (targetBuffer.size() < bytesPerOutFrame)
     targetBuffer.resize(bytesPerOutFrame);
 
@@ -2849,7 +2851,7 @@ void videoHandlerYUV::slotYUVFormatControlChanged(int selectionIndex)
 void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
 {
   // Store the number bytes per frame of the old pixel format
-  auto oldFormatBytesPerFrame = srcPixelFormat.bytesPerFrame(frameSize);
+  auto oldFormatBytesPerFrame = srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride);
 
   // Set the new pixel format. Lock the mutex, so that no background process is running wile the
   // format changes.
@@ -2896,7 +2898,7 @@ void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
     // Set the cache to invalid until it is cleared an recached
     this->setCacheInvalid();
 
-    if (srcPixelFormat.bytesPerFrame(frameSize) != oldFormatBytesPerFrame)
+    if (srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride) != oldFormatBytesPerFrame)
       // The number of bytes per frame changed. The raw YUV data buffer is also out of date
       this->currentFrameRawData_frameIndex = -1;
 
@@ -2913,7 +2915,7 @@ void videoHandlerYUV::slotYUVControlChanged()
       sender == ui.colorConversionComboBox || sender == ui.lumaScaleSpinBox ||
       sender == ui.lumaOffsetSpinBox || sender == ui.lumaInvertCheckBox ||
       sender == ui.chromaScaleSpinBox || sender == ui.chromaOffsetSpinBox ||
-      sender == ui.chromaInvertCheckBox || sender == ui.byteStrideSpinBox)
+      sender == ui.chromaInvertCheckBox)
   {
     this->conversionSettings.chromaInterpolation =
         *ChromaInterpolationMapper.getValueAt(ui.chromaInterpolationComboBox->currentIndex());
@@ -2932,7 +2934,6 @@ void videoHandlerYUV::slotYUVControlChanged()
         ui.chromaOffsetSpinBox->value();
     this->conversionSettings.mathParameters[Component::Chroma].invert =
         ui.chromaInvertCheckBox->isChecked();
-    this->conversionSettings.byteStride = ui.byteStrideSpinBox->value();
 
     // Set the current frame in the buffer to be invalid and clear the cache.
     // Emit that this item needs redraw and the cache needs updating.
@@ -2941,18 +2942,19 @@ void videoHandlerYUV::slotYUVControlChanged()
     this->setCacheInvalid();
     emit signalHandlerChanged(true, RECACHE_CLEAR);
   }
-  else if (sender == ui.yuvFormatComboBox)
+  else if (sender == ui.yuvFormatComboBox || sender == ui.byteStrideSpinBox)
   {
-    auto oldFormatBytesPerFrame = this->srcPixelFormat.bytesPerFrame(frameSize);
+    auto oldFormatBytesPerFrame = this->srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride);
 
     // Set the new YUV format
     // setSrcPixelFormat(yuvFormatList.getFromName(ui.yuvFormatComboBox->currentText()));
+    this->conversionSettings.byteStride = ui.byteStrideSpinBox->value();
 
     // Set the current frame in the buffer to be invalid and clear the cache.
     // Emit that this item needs redraw and the cache needs updating.
     this->currentImageIndex       = -1;
     this->currentImage_frameIndex = -1;
-    if (this->srcPixelFormat.bytesPerFrame(frameSize) != oldFormatBytesPerFrame)
+    if (this->srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride) != oldFormatBytesPerFrame)
       // The number of bytes per frame changed. The raw YUV data buffer also has to be updated.
       this->currentFrameRawData_frameIndex = -1;
     this->setCacheInvalid();
@@ -3357,7 +3359,7 @@ void videoHandlerYUV::setFormatFromCorrelation(const QByteArray &rawYUVData, int
 
     for (testFormatAndSize &testFormat : formatList)
     {
-      auto picSize = testFormat.format.bytesPerFrame(testFormat.size);
+      auto picSize = testFormat.format.bytesPerFrame(testFormat.size, 0);
 
       const bool atLeastTwoPictureInInput = fileSize >= (picSize * 2);
       if (atLeastTwoPictureInInput)
@@ -3379,7 +3381,7 @@ void videoHandlerYUV::setFormatFromCorrelation(const QByteArray &rawYUVData, int
   {
     if (testFormat.interesting)
     {
-      auto picSize     = testFormat.format.bytesPerFrame(testFormat.size);
+      auto picSize     = testFormat.format.bytesPerFrame(testFormat.size, 0);
       int  lumaSamples = testFormat.size.width * testFormat.size.height;
 
       // Calculate the MSE for 2 frames

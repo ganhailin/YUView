@@ -100,7 +100,7 @@ bool doesPixelFormatMatchFileSize(const PixelFormatYUV         &pixelFormat,
   if (!fileSize)
     return true;
 
-  const auto bytesPerFrame = pixelFormat.bytesPerFrame(frameSize);
+  const auto bytesPerFrame = pixelFormat.bytesPerFrame(frameSize, 0);
   if (bytesPerFrame <= 0)
     return false;
 

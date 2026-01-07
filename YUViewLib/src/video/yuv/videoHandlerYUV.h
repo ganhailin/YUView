@@ -122,7 +122,7 @@ public:
   // Get the number of bytes for one YUV frame with the current format
   virtual int64_t getBytesPerFrame() const override
   {
-    return srcPixelFormat.bytesPerFrame(frameSize);
+    return srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride);
   }
 
   void
