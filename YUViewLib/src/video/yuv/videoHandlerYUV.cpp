@@ -443,7 +443,8 @@ std::pair<bool, PixelFormatYUV>
 convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
                           QByteArray               &targetBuffer,
                           const Size                curFrameSize,
-                          const ConversionSettings &conversionSettings)
+                          const ConversionSettings &conversionSettings,
+                          QByteArray               &copyData)
 {
 
   // The output format is 420 10 bit planar
@@ -453,21 +454,27 @@ convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
   const auto h = curFrameSize.height;
 
   auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
-  auto heightRoundUp = (((w + 2 - 1) / 2) * 2);
+  auto heightRoundUp = (((h + 2 - 1) / 2) * 2);
   auto strideIn      = widthRoundUp / 4 * 5;
 
   if (conversionSettings.byteStride > 0 && conversionSettings.byteStride > strideIn)
     strideIn = conversionSettings.byteStride;
 
-  int        totalSize = strideIn * heightRoundUp / 2 * 3;
+  int totalSize = strideIn * (heightRoundUp / 2 * 3);
+
   QByteArray copy_data;
   bool       use_copy = false;
 
   if (sourceBuffer.size() < totalSize)
   {
-    copy_data.append(sourceBuffer);
-    copy_data.resize(totalSize);
+    copyData.append(sourceBuffer);
+    copyData.resize(totalSize);
     use_copy = true;
+  }
+  else
+  {
+    copyData.resize(0);
+    copyData.squeeze();
   }
 
   const auto bytesPerOutFrame = newFormat.bytesPerFrame({widthRoundUp, heightRoundUp});
@@ -475,10 +482,10 @@ convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
     targetBuffer.resize(bytesPerOutFrame);
 
   const unsigned char *restrict src =
-    use_copy ? (unsigned char *)sourceBuffer.data() : (unsigned char *)copy_data.data();
-  unsigned short *restrict dstY     = (unsigned short *)targetBuffer.data();
-  unsigned short *restrict dstU     = dstY + w * h;
-  unsigned short *restrict dstV     = dstU + (w / 2) * (h / 2);
+    use_copy ? (unsigned char *)copyData.data() : (unsigned char *)sourceBuffer.data();
+  unsigned short *restrict dstY = (unsigned short *)targetBuffer.data();
+  unsigned short *restrict dstU = dstY + w * h;
+  unsigned short *restrict dstV = dstU + (w / 2) * (h / 2);
 
   NV15PackedToYUV420P16(src, w, h, strideIn, strideIn, dstY, dstU, dstV);
 
@@ -605,17 +612,35 @@ bool NV15PackedGetPixelYUV(const uint8_t *nv15,
   return true;
 }
 
-yuv_t getPixelValueNV15(const QByteArray &sourceBuffer,
-                        const Size       &curFrameSize,
-                        const QPoint     &pixelPos)
+yuv_t getPixelValueNV15(const QByteArray         &sourceBuffer,
+                        const Size               &curFrameSize,
+                        const QPoint             &pixelPos,
+                        const ConversionSettings &conversionSettings,
+                        const QByteArray         &copyData)
 {
   const auto w = curFrameSize.width;
   const auto h = curFrameSize.height;
 
-  auto widthRoundUp = (((w + 4 - 1) / 4) * 4);
-  auto strideIn     = widthRoundUp / 4 * 5;
+  auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
+  auto heightRoundUp = (((h + 2 - 1) / 2) * 2);
+  auto strideIn      = widthRoundUp / 4 * 5;
 
-  const unsigned char *restrict src = (unsigned char *)sourceBuffer.data();
+  if (conversionSettings.byteStride > 0 && conversionSettings.byteStride > strideIn)
+    strideIn = conversionSettings.byteStride;
+
+  int  totalSize = strideIn * (heightRoundUp / 2 * 3);
+  bool use_copy  = false;
+
+  if (sourceBuffer.size() < totalSize)
+  {
+    // Check copied data size
+    if (copyData.size() < totalSize)
+      return {0, 0, 0};
+    use_copy = true;
+  }
+
+  const unsigned char *restrict src =
+    use_copy ? (unsigned char *)copyData.data() : (unsigned char *)sourceBuffer.data();
 
   uint16_t out_y = 0, out_u = 0, out_v = 0;
 
@@ -2484,7 +2509,8 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
                        QImage                   &outputImage,
                        const PixelFormatYUV     &yuvFormat,
                        const Size               &curFrameSize,
-                       const ConversionSettings &conversionSettings)
+                       const ConversionSettings &conversionSettings,
+                       QByteArray               &copyBuffer)
 {
   if (!yuvFormat.canConvertToRGB(curFrameSize) || sourceBuffer.isEmpty())
   {
@@ -2559,8 +2585,8 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
         std::tie(convOK, newPixelFormat) =
             convertV210PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize);
       else if (*predefinedFormat == PredefinedPixelFormat::NV15)
-        std::tie(convOK, newPixelFormat) =
-            convertNV15PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, curFrameSize, conversionSettings);
+        std::tie(convOK, newPixelFormat) = convertNV15PackedToPlanar(
+          sourceBuffer, tmpPlanarYUVSource, curFrameSize, conversionSettings, copyBuffer);
       else
         convOK = false;
     }
@@ -3436,7 +3462,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
                       newImage,
                       this->srcPixelFormat,
                       this->frameSize,
-                      this->conversionSettings);
+                      this->conversionSettings,
+                      this->copyData);
     doubleBufferImage           = newImage;
     doubleBufferImageFrameIndex = frameIndex;
   }
@@ -3447,7 +3474,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
                       newImage,
                       this->srcPixelFormat,
                       this->frameSize,
-                      this->conversionSettings);
+                      this->conversionSettings,
+                      this->copyData);
     QMutexLocker setLock(&currentImageSetMutex);
     currentImage      = newImage;
     currentImageIndex = frameIndex;
@@ -3477,8 +3505,12 @@ void videoHandlerYUV::loadFrameForCaching(int frameIndex, QImage &frameToCache)
   }
 
   // Convert YUV to image. This can then be cached.
-  convertYUVToImage(
-      tmpBufferRawYUVDataCaching, frameToCache, yuvFormat, curFrameSize, conversionSettings);
+  convertYUVToImage(tmpBufferRawYUVDataCaching,
+                    frameToCache,
+                    yuvFormat,
+                    curFrameSize,
+                    conversionSettings,
+                    this->copyData);
 }
 
 // Load the raw YUV data for the given frame index into currentFrameRawData.
@@ -3524,7 +3556,8 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
     if (predefinedFormat == PredefinedPixelFormat::V210)
       value = getPixelValueV210(currentFrameRawData, frameSize, pixelPos);
     else if (predefinedFormat == PredefinedPixelFormat::NV15)
-      value = getPixelValueNV15(currentFrameRawData, frameSize, pixelPos);
+      value = getPixelValueNV15(
+        currentFrameRawData, frameSize, pixelPos, this->conversionSettings, this->copyData);
   }
   else if (format.isPlanar())
   {

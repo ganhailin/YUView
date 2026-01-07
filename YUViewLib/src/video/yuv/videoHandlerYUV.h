@@ -230,6 +230,7 @@ private:
   bool           diffReady{};
   QByteArray     diffYUV;
   PixelFormatYUV diffYUVFormat{};
+  QByteArray     copyData;
 
   static std::vector<PixelFormatYUV> formatPresetList;
 
