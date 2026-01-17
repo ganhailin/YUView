@@ -389,14 +389,17 @@ static inline void Unpack4x10(const uint8_t *src, uint16_t *dst)
   dst[3] = ((src[3] >> 6) & 0x0F) | ((src[4] & 0xFF) << 2); // 2+8
 }
 
-void NV15PackedToYUV420P16(const uint8_t *src,
+void YUV10bitPackedToYUV420P16(const uint8_t *src,
                            int            width,
                            int            height,
                            int            y_stride_bytes,
                            int            uv_stride_bytes,
                            uint16_t      *dst_y,
                            uint16_t      *dst_u,
-                           uint16_t      *dst_v)
+                           uint16_t      *dst_v,
+                           bool           x_div2,
+                           bool           y_div2,
+                           bool           uv_swap)
 {
   // ---------- Y plane ----------
   const uint8_t *src_y = src;
@@ -416,8 +419,8 @@ void NV15PackedToYUV420P16(const uint8_t *src,
   // ---------- UV plane ----------
   const uint8_t *src_uv = src + y_stride_bytes * height;
 
-  const int cw = width >> 1;
-  const int ch = height >> 1;
+  const int cw = x_div2 ? width >> 1: width;
+  const int ch = y_div2 ? height >> 1: height;
 
   for (int y = 0; y < ch; ++y)
   {
@@ -431,10 +434,17 @@ void NV15PackedToYUV420P16(const uint8_t *src,
       uint16_t uv[4];
       Unpack4x10(row + (x * 5) / 2, uv);
       // uv[] = U0 V0 U1 V1
-      out_u[x + 0] = uv[0];
-      out_v[x + 0] = uv[1];
-      out_u[x + 1] = uv[2];
-      out_v[x + 1] = uv[3];
+      if (uv_swap) {
+        out_v[x + 0] = uv[0];
+        out_u[x + 0] = uv[1];
+        out_v[x + 1] = uv[2];
+        out_u[x + 1] = uv[3];
+      } else {
+        out_u[x + 0] = uv[0];
+        out_v[x + 0] = uv[1];
+        out_u[x + 1] = uv[2];
+        out_v[x + 1] = uv[3];
+      }
     }
   }
 }
@@ -455,12 +465,21 @@ convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
 
   auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
   auto heightRoundUp = (((h + 2 - 1) / 2) * 2);
-  auto strideIn      = widthRoundUp / 4 * 5;
+  int strideInY      = widthRoundUp / 4 * 5;
+  int strideInUV      = widthRoundUp / 4 * 5;
 
-  if (conversionSettings.byteStride > 0 && conversionSettings.byteStride > strideIn)
-    strideIn = conversionSettings.byteStride;
+  std::map<Component, int> byteStrides = conversionSettings.byteStrides;
+  if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+    strideInY = byteStrides[Component::Luma];
 
-  int totalSize = strideIn * (heightRoundUp / 2 * 3);
+  if (byteStrides[Component::Chroma] > 0){
+    if(byteStrides[Component::Chroma] > strideInUV)
+      strideInUV = byteStrides[Component::Chroma];
+  } else if (strideInY > strideInUV) {
+    strideInUV = strideInY;
+  }
+
+  int totalSize = strideInY * heightRoundUp + strideInUV * heightRoundUp / 2;
 
   QByteArray copy_data;
   bool       use_copy = false;
@@ -489,7 +508,135 @@ convertNV15PackedToPlanar(const QByteArray         &sourceBuffer,
   unsigned short *restrict dstU = dstY + w * h;
   unsigned short *restrict dstV = dstU + (w / 2) * (h / 2);
 
-  NV15PackedToYUV420P16(src, w, h, strideIn, strideIn, dstY, dstU, dstV);
+  YUV10bitPackedToYUV420P16(src, w, h, strideInY, strideInUV, dstY, dstU, dstV, true, true, conversionSettings.mathParameters.at(Component::Chroma).swapped);
+
+  return {true, newFormat};
+}
+
+std::pair<bool, PixelFormatYUV>
+convertNV20PackedToPlanar(const QByteArray         &sourceBuffer,
+                          QByteArray               &targetBuffer,
+                          const Size                curFrameSize,
+                          const ConversionSettings &conversionSettings,
+                          QByteArray               &copyData)
+{
+
+  // The output format is 420 10 bit planar
+  auto newFormat = PixelFormatYUV(Subsampling::YUV_422, 10, PlaneOrder::YUV);
+
+  const auto w = curFrameSize.width;
+  const auto h = curFrameSize.height;
+
+  auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
+  auto heightRoundUp = h;
+  int strideInY      = widthRoundUp / 4 * 5;
+  int strideInUV      = widthRoundUp / 4 * 5;
+
+  std::map<Component, int> byteStrides = conversionSettings.byteStrides;
+  if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+    strideInY = byteStrides[Component::Luma];
+
+  if (byteStrides[Component::Chroma] > 0){
+    if(byteStrides[Component::Chroma] > strideInUV)
+      strideInUV = byteStrides[Component::Chroma];
+  } else if (strideInY > strideInUV) {
+    strideInUV = strideInY;
+  }
+
+  int totalSize = (strideInY + strideInUV) * heightRoundUp;
+
+  QByteArray copy_data;
+  bool       use_copy = false;
+
+  if (sourceBuffer.size() < totalSize)
+  {
+    copyData.resize(0);
+    copyData.squeeze();
+    copyData = sourceBuffer;
+    copyData.resize(totalSize);
+    use_copy = true;
+  }
+  else
+  {
+    copyData.resize(0);
+    copyData.squeeze();
+  }
+
+  const auto bytesPerOutFrame = newFormat.bytesPerFrame({widthRoundUp, heightRoundUp}, 0);
+  if (targetBuffer.size() < bytesPerOutFrame)
+    targetBuffer.resize(bytesPerOutFrame);
+
+  const unsigned char *restrict src =
+    use_copy ? (unsigned char *)copyData.data() : (unsigned char *)sourceBuffer.data();
+  unsigned short *restrict dstY = (unsigned short *)targetBuffer.data();
+  unsigned short *restrict dstU = dstY + w * h;
+  unsigned short *restrict dstV = dstU + (w / 2) * (h);
+
+  YUV10bitPackedToYUV420P16(src, w, h, strideInY, strideInUV, dstY, dstU, dstV, true, false, conversionSettings.mathParameters.at(Component::Chroma).swapped);
+
+  return {true, newFormat};
+}
+
+std::pair<bool, PixelFormatYUV>
+convertNV30PackedToPlanar(const QByteArray         &sourceBuffer,
+                          QByteArray               &targetBuffer,
+                          const Size                curFrameSize,
+                          const ConversionSettings &conversionSettings,
+                          QByteArray               &copyData)
+{
+
+  // The output format is 420 10 bit planar
+  auto newFormat = PixelFormatYUV(Subsampling::YUV_444, 10, PlaneOrder::YUV);
+
+  const auto w = curFrameSize.width;
+  const auto h = curFrameSize.height;
+
+  auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
+  auto heightRoundUp = h;
+  int strideInY      = widthRoundUp / 4 * 5;
+  int strideInUV      = widthRoundUp / 4 * 5 * 2;
+
+  std::map<Component, int> byteStrides = conversionSettings.byteStrides;
+  if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+    strideInY = byteStrides[Component::Luma];
+
+  if (byteStrides[Component::Chroma] > 0){
+    if(byteStrides[Component::Chroma] > strideInUV)
+      strideInUV = byteStrides[Component::Chroma];
+  } else if (strideInY * 2 > strideInUV) {
+    strideInUV = strideInY * 2;
+  }
+
+  int totalSize = (strideInY + strideInUV) * heightRoundUp ;
+
+  QByteArray copy_data;
+  bool       use_copy = false;
+
+  if (sourceBuffer.size() < totalSize)
+  {
+    copyData.resize(0);
+    copyData.squeeze();
+    copyData = sourceBuffer;
+    copyData.resize(totalSize);
+    use_copy = true;
+  }
+  else
+  {
+    copyData.resize(0);
+    copyData.squeeze();
+  }
+
+  const auto bytesPerOutFrame = newFormat.bytesPerFrame({widthRoundUp, heightRoundUp}, 0);
+  if (targetBuffer.size() < bytesPerOutFrame)
+    targetBuffer.resize(bytesPerOutFrame);
+
+  const unsigned char *restrict src =
+    use_copy ? (unsigned char *)copyData.data() : (unsigned char *)sourceBuffer.data();
+  unsigned short *restrict dstY = (unsigned short *)targetBuffer.data();
+  unsigned short *restrict dstU = dstY + w * h;
+  unsigned short *restrict dstV = dstU + w * h;
+
+  YUV10bitPackedToYUV420P16(src, w, h, strideInY, strideInUV, dstY, dstU, dstV, false, false, conversionSettings.mathParameters.at(Component::Chroma).swapped);
 
   return {true, newFormat};
 }
@@ -567,7 +714,7 @@ static inline uint16_t Unpack10At(const uint8_t *src, // 指向 5-byte group
   }
 }
 
-bool NV15PackedGetPixelYUV(const uint8_t *nv15,
+bool YUV10bitPackedGetPixelYUV(const uint8_t *src,
                            int            width,
                            int            height,
                            int            y_stride_bytes,
@@ -576,16 +723,20 @@ bool NV15PackedGetPixelYUV(const uint8_t *nv15,
                            int            y,
                            uint16_t      *out_y,
                            uint16_t      *out_u,
-                           uint16_t      *out_v)
+                           uint16_t      *out_v,
+                           bool           x_div2,
+                           bool           y_div2,
+                           bool           uv_swap
+                          )
 {
-  if (!nv15 || !out_y || !out_u || !out_v)
+  if (!src || !out_y || !out_u || !out_v)
     return false;
 
   if (x < 0 || x >= width || y < 0 || y >= height)
     return false;
 
   // ---------------- Y ----------------
-  const uint8_t *y_plane = nv15;
+  const uint8_t *y_plane = src;
 
   int y_group = x >> 2; // x / 4
   int y_index = x & 3;  // x % 4
@@ -595,10 +746,10 @@ bool NV15PackedGetPixelYUV(const uint8_t *nv15,
   *out_y = Unpack10At(y_ptr, y_index);
 
   // ---------------- UV ----------------
-  const uint8_t *uv_plane = nv15 + y_stride_bytes * height;
+  const uint8_t *uv_plane = src + y_stride_bytes * height;
 
-  int cx = x >> 1;
-  int cy = y >> 1;
+  int cx = x_div2 ? x >> 1: x;
+  int cy = y_div2 ? y >> 1: y;
 
   int uv_group = (cx >> 1);    // 2 chroma per group
   int uv_index = (cx & 1) * 2; // 0 or 2 → U/V slot
@@ -608,8 +759,13 @@ bool NV15PackedGetPixelYUV(const uint8_t *nv15,
   uint16_t uv0 = Unpack10At(uv_ptr, uv_index + 0);
   uint16_t uv1 = Unpack10At(uv_ptr, uv_index + 1);
 
-  *out_u = uv0;
-  *out_v = uv1;
+  if (uv_swap) {
+    *out_v = uv0;
+    *out_u = uv1;
+  } else {
+    *out_u = uv0;
+    *out_v = uv1;
+  }
 
   return true;
 }
@@ -625,12 +781,22 @@ yuv_t getPixelValueNV15(const QByteArray         &sourceBuffer,
 
   auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
   auto heightRoundUp = (((h + 2 - 1) / 2) * 2);
-  auto strideIn      = widthRoundUp / 4 * 5;
+  int strideInY      = widthRoundUp / 4 * 5;
+  int strideInUV      = widthRoundUp / 4 * 5;
 
-  if (conversionSettings.byteStride > 0 && conversionSettings.byteStride > strideIn)
-    strideIn = conversionSettings.byteStride;
+  std::map<Component, int> byteStrides = conversionSettings.byteStrides;
+  if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+    strideInY = byteStrides[Component::Luma];
 
-  int  totalSize = strideIn * (heightRoundUp / 2 * 3);
+  if (byteStrides[Component::Chroma] > 0){
+    if(byteStrides[Component::Chroma] > strideInUV)
+      strideInUV = byteStrides[Component::Chroma];
+  } else if (strideInY > strideInUV) {
+    strideInUV = strideInY;
+  }
+
+  int totalSize = strideInY * heightRoundUp + strideInUV * heightRoundUp / 2;
+
   bool use_copy  = false;
 
   if (sourceBuffer.size() < totalSize)
@@ -646,8 +812,108 @@ yuv_t getPixelValueNV15(const QByteArray         &sourceBuffer,
 
   uint16_t out_y = 0, out_u = 0, out_v = 0;
 
-  NV15PackedGetPixelYUV(
-    src, w, h, strideIn, strideIn, pixelPos.x(), pixelPos.y(), &out_y, &out_u, &out_v);
+  YUV10bitPackedGetPixelYUV(
+    src, w, h, strideInY, strideInUV, pixelPos.x(), pixelPos.y(), &out_y, &out_u, &out_v, true, true, conversionSettings.mathParameters.at(Component::Chroma).swapped);
+
+  yuv_t ret = {out_y, out_u, out_v};
+
+  return ret;
+}
+
+yuv_t getPixelValueNV20(const QByteArray         &sourceBuffer,
+                        const Size               &curFrameSize,
+                        const QPoint             &pixelPos,
+                        const ConversionSettings &conversionSettings,
+                        const QByteArray         &copyData)
+{
+  const auto w = curFrameSize.width;
+  const auto h = curFrameSize.height;
+
+  auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
+  auto heightRoundUp = h;
+  int strideInY      = widthRoundUp / 4 * 5;
+  int strideInUV      = widthRoundUp / 4 * 5;
+
+  std::map<Component, int> byteStrides = conversionSettings.byteStrides;
+  if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+    strideInY = byteStrides[Component::Luma];
+
+  if (byteStrides[Component::Chroma] > 0){
+    if(byteStrides[Component::Chroma] > strideInUV)
+      strideInUV = byteStrides[Component::Chroma];
+  } else if (strideInY > strideInUV) {
+    strideInUV = strideInY;
+  }
+
+  int totalSize = (strideInY + strideInUV) * heightRoundUp;
+
+  bool use_copy  = false;
+
+  if (sourceBuffer.size() < totalSize)
+  {
+    // Check copied data size
+    if (copyData.size() < totalSize)
+      return {0, 0, 0};
+    use_copy = true;
+  }
+
+  const unsigned char *restrict src =
+    use_copy ? (unsigned char *)copyData.data() : (unsigned char *)sourceBuffer.data();
+
+  uint16_t out_y = 0, out_u = 0, out_v = 0;
+
+  YUV10bitPackedGetPixelYUV(
+    src, w, h, strideInY, strideInUV, pixelPos.x(), pixelPos.y(), &out_y, &out_u, &out_v, true, false, conversionSettings.mathParameters.at(Component::Chroma).swapped);
+
+  yuv_t ret = {out_y, out_u, out_v};
+
+  return ret;
+}
+
+yuv_t getPixelValueNV30(const QByteArray         &sourceBuffer,
+                        const Size               &curFrameSize,
+                        const QPoint             &pixelPos,
+                        const ConversionSettings &conversionSettings,
+                        const QByteArray         &copyData)
+{
+  const auto w = curFrameSize.width;
+  const auto h = curFrameSize.height;
+
+  auto widthRoundUp  = (((w + 4 - 1) / 4) * 4);
+  auto heightRoundUp = h;
+  int strideInY      = widthRoundUp / 4 * 5;
+  int strideInUV      = widthRoundUp / 4 * 5 * 2;
+
+  std::map<Component, int> byteStrides = conversionSettings.byteStrides;
+  if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+    strideInY = byteStrides[Component::Luma];
+
+  if (byteStrides[Component::Chroma] > 0){
+    if(byteStrides[Component::Chroma] > strideInUV)
+      strideInUV = byteStrides[Component::Chroma];
+  } else if (strideInY * 2 > strideInUV) {
+    strideInUV = strideInY * 2;
+  }
+
+  int totalSize = (strideInY + strideInUV) * heightRoundUp ;
+
+  bool use_copy  = false;
+
+  if (sourceBuffer.size() < totalSize)
+  {
+    // Check copied data size
+    if (copyData.size() < totalSize)
+      return {0, 0, 0};
+    use_copy = true;
+  }
+
+  const unsigned char *restrict src =
+    use_copy ? (unsigned char *)copyData.data() : (unsigned char *)sourceBuffer.data();
+
+  uint16_t out_y = 0, out_u = 0, out_v = 0;
+
+  YUV10bitPackedGetPixelYUV(
+    src, w, h, strideInY, strideInUV, pixelPos.x(), pixelPos.y(), &out_y, &out_u, &out_v, false, false, conversionSettings.mathParameters.at(Component::Chroma).swapped);
 
   yuv_t ret = {out_y, out_u, out_v};
 
@@ -2589,6 +2855,12 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
       else if (*predefinedFormat == PredefinedPixelFormat::NV15)
         std::tie(convOK, newPixelFormat) = convertNV15PackedToPlanar(
           sourceBuffer, tmpPlanarYUVSource, curFrameSize, conversionSettings, copyBuffer);
+      else if (*predefinedFormat == PredefinedPixelFormat::NV20)
+        std::tie(convOK, newPixelFormat) = convertNV20PackedToPlanar(
+          sourceBuffer, tmpPlanarYUVSource, curFrameSize, conversionSettings, copyBuffer);
+      else if (*predefinedFormat == PredefinedPixelFormat::NV30)
+        std::tie(convOK, newPixelFormat) = convertNV30PackedToPlanar(
+          sourceBuffer, tmpPlanarYUVSource, curFrameSize, conversionSettings, copyBuffer);
       else
         convOK = false;
     }
@@ -2625,6 +2897,8 @@ std::vector<PixelFormatYUV> videoHandlerYUV::formatPresetList = {
     PixelFormatYUV(Subsampling::YUV_444, 8, PlaneOrder::YUV),
     PixelFormatYUV(PredefinedPixelFormat::V210),
     PixelFormatYUV(PredefinedPixelFormat::NV15),
+    PixelFormatYUV(PredefinedPixelFormat::NV20),
+    PixelFormatYUV(PredefinedPixelFormat::NV30),
 };
 
 videoHandlerYUV::videoHandlerYUV() : videoHandler()
@@ -2657,8 +2931,18 @@ void videoHandlerYUV::loadValues(Size newFramesize, const QString &)
   {
     if (auto predefinedFormat = srcPixelFormat.getPredefinedFormat())
     {
-      if (predefinedFormat == PredefinedPixelFormat::NV15)
-        ui.byteStrideSpinBox->setValue((newFramesize.width + 3) / 4 * 5);
+      if (predefinedFormat == PredefinedPixelFormat::NV15) {
+        ui.byteStrideYSpinBox->setValue((newFramesize.width + 3) / 4 * 5);
+        ui.byteStrideUVSpinBox->setValue(0);
+      }
+      if (predefinedFormat == PredefinedPixelFormat::NV20) {
+        ui.byteStrideYSpinBox->setValue((newFramesize.width + 3) / 4 * 5);
+        ui.byteStrideUVSpinBox->setValue(0);
+      }
+      if (predefinedFormat == PredefinedPixelFormat::NV30) {
+        ui.byteStrideYSpinBox->setValue((newFramesize.width + 3) / 4 * 5);
+        ui.byteStrideUVSpinBox->setValue(0);
+      }
     }
   }
 }
@@ -2756,8 +3040,12 @@ QLayout *videoHandlerYUV::createVideoHandlerControls(bool isSizeAndFormatFixed)
       this->conversionSettings.mathParameters[Component::Chroma].offset);
   ui.chromaInvertCheckBox->setChecked(
       this->conversionSettings.mathParameters[Component::Chroma].invert);
-  ui.byteStrideSpinBox->setMinimum(0);
-  ui.byteStrideSpinBox->setMaximum(1000000);
+  ui.chromaSwapCheckBox->setChecked(
+      this->conversionSettings.mathParameters[Component::Chroma].swapped);
+  ui.byteStrideYSpinBox->setMinimum(0);
+  ui.byteStrideYSpinBox->setMaximum(1000000);
+  ui.byteStrideUVSpinBox->setMinimum(0);
+  ui.byteStrideUVSpinBox->setMaximum(1000000);
 
   // Connect all the change signals from the controls to "connectWidgetSignals()"
   connect(ui.yuvFormatComboBox,
@@ -2800,7 +3088,15 @@ QLayout *videoHandlerYUV::createVideoHandlerControls(bool isSizeAndFormatFixed)
           &QCheckBox::stateChanged,
           this,
           &videoHandlerYUV::slotYUVControlChanged);
-  connect(ui.byteStrideSpinBox,
+  connect(ui.chromaSwapCheckBox,
+          &QCheckBox::stateChanged,
+          this,
+          &videoHandlerYUV::slotYUVControlChanged);
+  connect(ui.byteStrideYSpinBox,
+          QOverload<int>::of(&QSpinBox::valueChanged),
+          this,
+          &videoHandlerYUV::slotYUVControlChanged);
+  connect(ui.byteStrideUVSpinBox,
           QOverload<int>::of(&QSpinBox::valueChanged),
           this,
           &videoHandlerYUV::slotYUVControlChanged);
@@ -2851,7 +3147,7 @@ void videoHandlerYUV::slotYUVFormatControlChanged(int selectionIndex)
 void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
 {
   // Store the number bytes per frame of the old pixel format
-  auto oldFormatBytesPerFrame = srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride);
+  auto oldFormatBytesPerFrame = srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStrides);
 
   // Set the new pixel format. Lock the mutex, so that no background process is running wile the
   // format changes.
@@ -2883,8 +3179,18 @@ void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
     {
       if (auto predefinedFormat = srcPixelFormat.getPredefinedFormat())
       {
-        if (predefinedFormat == PredefinedPixelFormat::NV15)
-          ui.byteStrideSpinBox->setValue((frameSize.width + 3) / 4 * 5);
+        if (predefinedFormat == PredefinedPixelFormat::NV15) {
+          ui.byteStrideYSpinBox->setValue((frameSize.width + 3) / 4 * 5);
+          ui.byteStrideUVSpinBox->setValue(0);
+        }
+        if (predefinedFormat == PredefinedPixelFormat::NV20) {
+          ui.byteStrideYSpinBox->setValue((frameSize.width + 3) / 4 * 5);
+          ui.byteStrideUVSpinBox->setValue(0);
+        }
+        if (predefinedFormat == PredefinedPixelFormat::NV30) {
+          ui.byteStrideYSpinBox->setValue((frameSize.width + 3) / 4 * 5);
+          ui.byteStrideUVSpinBox->setValue(0);
+        }
       }
     }
   }
@@ -2898,7 +3204,7 @@ void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
     // Set the cache to invalid until it is cleared an recached
     this->setCacheInvalid();
 
-    if (srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride) != oldFormatBytesPerFrame)
+    if (srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStrides) != oldFormatBytesPerFrame)
       // The number of bytes per frame changed. The raw YUV data buffer is also out of date
       this->currentFrameRawData_frameIndex = -1;
 
@@ -2915,7 +3221,7 @@ void videoHandlerYUV::slotYUVControlChanged()
       sender == ui.colorConversionComboBox || sender == ui.lumaScaleSpinBox ||
       sender == ui.lumaOffsetSpinBox || sender == ui.lumaInvertCheckBox ||
       sender == ui.chromaScaleSpinBox || sender == ui.chromaOffsetSpinBox ||
-      sender == ui.chromaInvertCheckBox)
+      sender == ui.chromaInvertCheckBox || sender == ui.chromaSwapCheckBox)
   {
     this->conversionSettings.chromaInterpolation =
         *ChromaInterpolationMapper.getValueAt(ui.chromaInterpolationComboBox->currentIndex());
@@ -2934,6 +3240,8 @@ void videoHandlerYUV::slotYUVControlChanged()
         ui.chromaOffsetSpinBox->value();
     this->conversionSettings.mathParameters[Component::Chroma].invert =
         ui.chromaInvertCheckBox->isChecked();
+    this->conversionSettings.mathParameters[Component::Chroma].swapped =
+        ui.chromaSwapCheckBox->isChecked();
 
     // Set the current frame in the buffer to be invalid and clear the cache.
     // Emit that this item needs redraw and the cache needs updating.
@@ -2942,19 +3250,20 @@ void videoHandlerYUV::slotYUVControlChanged()
     this->setCacheInvalid();
     emit signalHandlerChanged(true, RECACHE_CLEAR);
   }
-  else if (sender == ui.yuvFormatComboBox || sender == ui.byteStrideSpinBox)
+  else if (sender == ui.yuvFormatComboBox || sender == ui.byteStrideYSpinBox || sender == ui.byteStrideUVSpinBox)
   {
-    auto oldFormatBytesPerFrame = this->srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride);
+    auto oldFormatBytesPerFrame = this->srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStrides);
 
     // Set the new YUV format
     // setSrcPixelFormat(yuvFormatList.getFromName(ui.yuvFormatComboBox->currentText()));
-    this->conversionSettings.byteStride = ui.byteStrideSpinBox->value();
+    this->conversionSettings.byteStrides[Component::Luma] = ui.byteStrideYSpinBox->value();
+    this->conversionSettings.byteStrides[Component::Chroma] = ui.byteStrideUVSpinBox->value();
 
     // Set the current frame in the buffer to be invalid and clear the cache.
     // Emit that this item needs redraw and the cache needs updating.
     this->currentImageIndex       = -1;
     this->currentImage_frameIndex = -1;
-    if (this->srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride) != oldFormatBytesPerFrame)
+    if (this->srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStrides) != oldFormatBytesPerFrame)
       // The number of bytes per frame changed. The raw YUV data buffer also has to be updated.
       this->currentFrameRawData_frameIndex = -1;
     this->setCacheInvalid();
@@ -3559,6 +3868,12 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
       value = getPixelValueV210(currentFrameRawData, frameSize, pixelPos);
     else if (predefinedFormat == PredefinedPixelFormat::NV15)
       value = getPixelValueNV15(
+        currentFrameRawData, frameSize, pixelPos, this->conversionSettings, this->copyData);
+    else if (predefinedFormat == PredefinedPixelFormat::NV20)
+      value = getPixelValueNV20(
+        currentFrameRawData, frameSize, pixelPos, this->conversionSettings, this->copyData);
+    else if (predefinedFormat == PredefinedPixelFormat::NV30)
+      value = getPixelValueNV30(
         currentFrameRawData, frameSize, pixelPos, this->conversionSettings, this->copyData);
   }
   else if (format.isPlanar())

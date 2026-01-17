@@ -104,6 +104,7 @@ public:
   int  scale{1};
   int  offset{128};
   bool invert{};
+  bool swapped{};
 };
 
 enum class PredefinedPixelFormat
@@ -112,12 +113,18 @@ enum class PredefinedPixelFormat
   // Packed 422 format with 12 10 bit values in 16 bytes
   V210,
   // Two Plane UV Interleaved 420 format with 4 10 bit values in 5 bytes form rockchip
-  NV15
+  NV15,
+  // Two Plane UV Interleaved 422 format with 4 10 bit values in 5 bytes form rockchip
+  NV20,
+  // Two Plane UV Interleaved 444 format with 4 10 bit values in 5 bytes form rockchip
+  NV30
 };
 
-constexpr EnumMapper<PredefinedPixelFormat, 2> PredefinedPixelFormatMapper = {
+constexpr EnumMapper<PredefinedPixelFormat, 4> PredefinedPixelFormatMapper = {
     std::make_pair(PredefinedPixelFormat::V210, "V210"),
-    std::make_pair(PredefinedPixelFormat::NV15, "NV15")
+    std::make_pair(PredefinedPixelFormat::NV15, "NV15"),
+    std::make_pair(PredefinedPixelFormat::NV20, "NV20"),
+    std::make_pair(PredefinedPixelFormat::NV30, "NV30"),
 };
 
 enum class PackingOrder
@@ -216,7 +223,11 @@ public:
 
   bool        isValid() const;
   bool        canConvertToRGB(Size frameSize, std::string *whyNot = nullptr) const;
-  int64_t     bytesPerFrame(const Size &frameSize, int byteStride) const;
+  int64_t     bytesPerFrame(const Size &frameSize, std::map<Component, int> byteStrides) const;
+  int64_t     bytesPerFrame(const Size &frameSize, int byteStride) const {
+    return bytesPerFrame(frameSize, {{Component::Luma, byteStride}, {Component::Chroma, byteStride}});
+  }
+
   std::string getName() const;
   unsigned    getNrPlanes() const;
   void        setDefaultChromaOffset();

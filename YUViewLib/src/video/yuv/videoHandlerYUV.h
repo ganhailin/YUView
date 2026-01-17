@@ -70,7 +70,7 @@ struct ConversionSettings
   // Parameters for the YUV transformation (like scaling, invert, offset). For Luma ([0]) and
   // chroma([1]).
   std::map<Component, MathParameters> mathParameters;
-  int byteStride;
+  std::map<Component, int> byteStrides;
 };
 
 /** The videoHandlerYUV can be used in any playlistItem to read/display YUV data. A playlistItem
@@ -122,7 +122,7 @@ public:
   // Get the number of bytes for one YUV frame with the current format
   virtual int64_t getBytesPerFrame() const override
   {
-    return srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStride);
+    return srcPixelFormat.bytesPerFrame(frameSize, this->conversionSettings.byteStrides);
   }
 
   void

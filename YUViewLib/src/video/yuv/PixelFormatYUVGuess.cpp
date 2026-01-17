@@ -196,6 +196,26 @@ PixelFormatYUV testFormatFromSizeAndNamePacked(const std::string            &nam
       return fmt;
   }
 
+  // Check NV20
+  std::regex  strExpr_nv20("(?:_|\\.|-)(nv20|NV20)(?:_|\\.|-)");
+  std::smatch sm_nv20;
+  if (std::regex_search(name, sm_nv20, strExpr_nv20))
+  {
+    const auto fmt = PixelFormatYUV(PredefinedPixelFormat::NV20);
+    if (doesPixelFormatMatchFileSize(fmt, *guessedFrameFormat.frameSize, fileSize))
+      return fmt;
+  }
+
+  // Check NV30
+  std::regex  strExpr_nv30("(?:_|\\.|-)(nv30|NV30)(?:_|\\.|-)");
+  std::smatch sm_nv30;
+  if (std::regex_search(name, sm_nv30, strExpr_nv30))
+  {
+    const auto fmt = PixelFormatYUV(PredefinedPixelFormat::NV30);
+    if (doesPixelFormatMatchFileSize(fmt, *guessedFrameFormat.frameSize, fileSize))
+      return fmt;
+  }
+
   const auto bitDepthList = getDetectionBitDepthList(guessedFrameFormat.bitDepth);
 
   for (const auto subsampling : getDetectionSubsamplingList(detectedSubsampling, true))
@@ -267,9 +287,23 @@ checkSpecificFileExtensions(const GuessedFrameFormat &guessedFrameFormat,
 
   if (fileExtension == ".nv15" || fileExtension == ".NV15")
   {
-    const auto nv15Format = PixelFormatYUV(PredefinedPixelFormat::NV15);
-    if (doesPixelFormatMatchFileSize(nv15Format, *guessedFrameFormat.frameSize, fileInfo.fileSize))
-      return nv15Format;
+    const auto localFormat = PixelFormatYUV(PredefinedPixelFormat::NV15);
+    if (doesPixelFormatMatchFileSize(localFormat, *guessedFrameFormat.frameSize, fileInfo.fileSize))
+      return localFormat;
+  }
+
+  if (fileExtension == ".nv20" || fileExtension == ".NV20")
+  {
+    const auto localFormat = PixelFormatYUV(PredefinedPixelFormat::NV20);
+    if (doesPixelFormatMatchFileSize(localFormat, *guessedFrameFormat.frameSize, fileInfo.fileSize))
+      return localFormat;
+  }
+
+  if (fileExtension == ".nv30" || fileExtension == ".NV30")
+  {
+    const auto localFormat = PixelFormatYUV(PredefinedPixelFormat::NV30);
+    if (doesPixelFormatMatchFileSize(localFormat, *guessedFrameFormat.frameSize, fileInfo.fileSize))
+      return localFormat;
   }
 
   return {};

@@ -128,6 +128,10 @@ PixelFormatYUV::PixelFormatYUV(const std::string &name)
       this->predefinedPixelFormat = predefinedFormat;
     else if (*predefinedFormat == PredefinedPixelFormat::NV15)
       this->predefinedPixelFormat = predefinedFormat;
+    else if (*predefinedFormat == PredefinedPixelFormat::NV20)
+      this->predefinedPixelFormat = predefinedFormat;
+    else if (*predefinedFormat == PredefinedPixelFormat::NV30)
+      this->predefinedPixelFormat = predefinedFormat;
   }
 
   std::regex strExpr(
@@ -369,7 +373,7 @@ bool PixelFormatYUV::canConvertToRGB(Size imageSize, std::string *whyNot) const
   return canConvert;
 }
 
-int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize, int byteStride) const
+int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize, std::map<Component, int> byteStrides) const
 {
   if (this->predefinedPixelFormat)
   {
@@ -384,11 +388,62 @@ int64_t PixelFormatYUV::bytesPerFrame(const Size &frameSize, int byteStride) con
     {
       auto widthRoundUp  = (((frameSize.width + 4 - 1) / 4) * 4);
       auto heightRoundUp = (((frameSize.height + 2 - 1) / 2) * 2);
-      auto strideIn      = widthRoundUp / 4 * 5;
+      int strideInY      = widthRoundUp / 4 * 5;
+      int strideInUV      = widthRoundUp / 4 * 5;
 
-      if (byteStride > 0 && byteStride > strideIn)
-        strideIn = byteStride;
-      return strideIn * (heightRoundUp / 2 * 3);
+      if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+        strideInY = byteStrides[Component::Luma];
+
+      if (byteStrides[Component::Chroma] > 0){
+        if(byteStrides[Component::Chroma] > strideInUV)
+          strideInUV = byteStrides[Component::Chroma];
+      } else if (strideInY > strideInUV) {
+        strideInUV = strideInY;
+      }
+
+      int totalSize = strideInY * heightRoundUp + strideInUV * heightRoundUp / 2;
+      return totalSize;
+    }
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+    {
+      auto widthRoundUp  = (((frameSize.width + 4 - 1) / 4) * 4);
+      auto heightRoundUp = frameSize.height;
+      int strideInY      = widthRoundUp / 4 * 5;
+      int strideInUV      = widthRoundUp / 4 * 5;
+
+      if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+        strideInY = byteStrides[Component::Luma];
+
+      if (byteStrides[Component::Chroma] > 0){
+        if(byteStrides[Component::Chroma] > strideInUV)
+          strideInUV = byteStrides[Component::Chroma];
+      } else if (strideInY > strideInUV) {
+        strideInUV = strideInY;
+      }
+
+      int totalSize = (strideInY + strideInUV) * heightRoundUp;
+      return totalSize;
+    }
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+    {
+      auto widthRoundUp  = (((frameSize.width + 4 - 1) / 4) * 4);
+      auto heightRoundUp = frameSize.height;
+      int strideInY      = widthRoundUp / 4 * 5;
+      int strideInUV      = widthRoundUp / 4 * 5 * 2;
+
+      if (byteStrides[Component::Luma] > 0 && byteStrides[Component::Luma] > strideInY)
+        strideInY = byteStrides[Component::Luma];
+
+      if (byteStrides[Component::Chroma] > 0){
+        if(byteStrides[Component::Chroma] > strideInUV)
+          strideInUV = byteStrides[Component::Chroma];
+      } else if (strideInY * 2 > strideInUV) {
+        strideInUV = strideInY * 2;
+      }
+
+      int totalSize = (strideInY + strideInUV) * heightRoundUp ;
+
+      return totalSize;
     }
     return -1;
   }
@@ -479,6 +534,10 @@ std::string PixelFormatYUV::getName() const
       return "V210";
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return "NV15";
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return "NV20";
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+      return "NV30";
     return "Invalid";
   }
 
@@ -521,6 +580,10 @@ unsigned PixelFormatYUV::getNrPlanes() const
       return 3;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return 2;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return 2;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+      return 2;
     return 0;
   }
 
@@ -540,6 +603,10 @@ Subsampling PixelFormatYUV::getSubsampling() const
       return Subsampling::YUV_422;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return Subsampling::YUV_420;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return Subsampling::YUV_422;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+      return Subsampling::YUV_444;
     return Subsampling::UNKNOWN;
   }
 
@@ -593,6 +660,10 @@ unsigned PixelFormatYUV::getBitsPerSample() const
       return 10;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return 10;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return 10;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+      return 10;
     return 0;
   }
 
@@ -606,6 +677,10 @@ bool PixelFormatYUV::isBigEndian() const
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return false;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
       return false;
     return false;
   }
@@ -621,6 +696,10 @@ bool PixelFormatYUV::isPlanar() const
       return false;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+      return false;
     return false;
   }
 
@@ -634,6 +713,10 @@ bool PixelFormatYUV::hasAlpha() const
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return false;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return false;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
       return false;
     return false;
   }
@@ -653,6 +736,10 @@ Offset PixelFormatYUV::getChromaOffset() const
       return Offset({0, 0});
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
       return Offset({0, 0});
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return Offset({0, 0});
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
+      return Offset({0, 0});
     return Offset({0, 0});
   }
 
@@ -666,6 +753,10 @@ bool PixelFormatYUV::isBytePacking() const
     if (*this->predefinedPixelFormat == PredefinedPixelFormat::V210)
       return true;
     else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV15)
+      return true;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV20)
+      return true;
+    else if (*this->predefinedPixelFormat == PredefinedPixelFormat::NV30)
       return true;
     return false;
   }

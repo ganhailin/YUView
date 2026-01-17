@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>246</width>
-    <height>310</height>
+    <height>348</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -77,6 +77,16 @@
           <string>Chroma</string>
          </property>
          <layout class="QGridLayout" name="gridLayout_3" columnstretch="0,1">
+          <item row="2" column="0" colspan="2">
+           <widget class="QCheckBox" name="chromaInvertCheckBox">
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use a scale, an offset and (optionally) inversion to transform the chroma YUV values before transformation to RGB. The value difference to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt; is scaled by &lt;span style=&quot; font-style:italic;&quot;&gt;scale&lt;/span&gt; relative to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt;. The used equation is:&lt;/p&gt;&lt;p&gt;C&lt;span style=&quot; vertical-align:sub;&quot;&gt;Out&lt;/span&gt; = inv*(C&lt;span style=&quot; vertical-align:sub;&quot;&gt;In&lt;/span&gt;-offset) * scale + offset&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;inv&lt;/span&gt; is -1 if inversion is activated and 1 if not.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>Invert</string>
+            </property>
+           </widget>
+          </item>
           <item row="1" column="0">
            <widget class="QLabel" name="label_7">
             <property name="toolTip">
@@ -87,15 +97,15 @@
             </property>
            </widget>
           </item>
-          <item row="0" column="1">
-           <widget class="QSpinBox" name="chromaScaleSpinBox">
+          <item row="1" column="1">
+           <widget class="QSpinBox" name="chromaOffsetSpinBox">
             <property name="toolTip">
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use a scale, an offset and (optionally) inversion to transform the chroma YUV values before transformation to RGB. The value difference to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt; is scaled by &lt;span style=&quot; font-style:italic;&quot;&gt;scale&lt;/span&gt; relative to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt;. The used equation is:&lt;/p&gt;&lt;p&gt;C&lt;span style=&quot; vertical-align:sub;&quot;&gt;Out&lt;/span&gt; = inv*(C&lt;span style=&quot; vertical-align:sub;&quot;&gt;In&lt;/span&gt;-offset) * scale + offset&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;inv&lt;/span&gt; is -1 if inversion is activated and 1 if not.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
            </widget>
           </item>
-          <item row="1" column="1">
-           <widget class="QSpinBox" name="chromaOffsetSpinBox">
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="chromaScaleSpinBox">
             <property name="toolTip">
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use a scale, an offset and (optionally) inversion to transform the chroma YUV values before transformation to RGB. The value difference to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt; is scaled by &lt;span style=&quot; font-style:italic;&quot;&gt;scale&lt;/span&gt; relative to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt;. The used equation is:&lt;/p&gt;&lt;p&gt;C&lt;span style=&quot; vertical-align:sub;&quot;&gt;Out&lt;/span&gt; = inv*(C&lt;span style=&quot; vertical-align:sub;&quot;&gt;In&lt;/span&gt;-offset) * scale + offset&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;inv&lt;/span&gt; is -1 if inversion is activated and 1 if not.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
@@ -111,13 +121,10 @@
             </property>
            </widget>
           </item>
-          <item row="2" column="0" colspan="2">
-           <widget class="QCheckBox" name="chromaInvertCheckBox">
-            <property name="toolTip">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use a scale, an offset and (optionally) inversion to transform the chroma YUV values before transformation to RGB. The value difference to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt; is scaled by &lt;span style=&quot; font-style:italic;&quot;&gt;scale&lt;/span&gt; relative to &lt;span style=&quot; font-style:italic;&quot;&gt;offset&lt;/span&gt;. The used equation is:&lt;/p&gt;&lt;p&gt;C&lt;span style=&quot; vertical-align:sub;&quot;&gt;Out&lt;/span&gt; = inv*(C&lt;span style=&quot; vertical-align:sub;&quot;&gt;In&lt;/span&gt;-offset) * scale + offset&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;inv&lt;/span&gt; is -1 if inversion is activated and 1 if not.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-            </property>
+          <item row="3" column="0" colspan="2">
+           <widget class="QCheckBox" name="chromaSwapCheckBox">
             <property name="text">
-             <string>Invert</string>
+             <string>UV Swap(NV15/NV20/NV30)</string>
             </property>
            </widget>
           </item>
@@ -128,40 +135,6 @@
      </item>
      <item>
       <layout class="QGridLayout" name="gridLayout" columnstretch="0,1">
-       <item row="3" column="1">
-        <widget class="QComboBox" name="colorConversionComboBox">
-         <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How to convert YUV to RGB. Several ITU recommendations are selectable.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QLabel" name="label_3">
-         <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How to convert YUV to RGB.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-         <property name="text">
-          <string>Color Conversion</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="1">
-        <widget class="QComboBox" name="chromaInterpolationComboBox">
-         <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If the color components are subsampled, how should interpolation to the full resolution be performed?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="label_2">
-         <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If the color components are subsampled, how should interpolation to the full resolution be performed?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-         </property>
-         <property name="text">
-          <string>Chroma Interpolation</string>
-         </property>
-        </widget>
-       </item>
        <item row="0" column="0">
         <widget class="QLabel" name="label_8">
          <property name="toolTip">
@@ -172,17 +145,17 @@
          </property>
         </widget>
        </item>
-       <item row="1" column="1">
-        <widget class="QComboBox" name="colorComponentsComboBox">
+       <item row="3" column="1">
+        <widget class="QComboBox" name="colorConversionComboBox">
          <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Which of the YUV components should be displayed? You can choose all or the luma or one of the color planes individually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How to convert YUV to RGB. Several ITU recommendations are selectable.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
         </widget>
        </item>
-       <item row="0" column="1">
-        <widget class="QComboBox" name="yuvFormatComboBox">
+       <item row="2" column="1">
+        <widget class="QComboBox" name="chromaInterpolationComboBox">
          <property name="toolTip">
-          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;What is the source format of the YUV file? E.g: The subsampling and bit depth. Select one of the predefined formats or select 'custom...' to define a custom format.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If the color components are subsampled, how should interpolation to the full resolution be performed?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
         </widget>
        </item>
@@ -196,15 +169,59 @@
          </property>
         </widget>
        </item>
+       <item row="3" column="0">
+        <widget class="QLabel" name="label_3">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;How to convert YUV to RGB.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="text">
+          <string>Color Conversion</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QComboBox" name="colorComponentsComboBox">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Which of the YUV components should be displayed? You can choose all or the luma or one of the color planes individually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+        </widget>
+       </item>
        <item row="4" column="0">
         <widget class="QLabel" name="label_9">
          <property name="text">
-          <string>Byte Stride</string>
+          <string>Y Byte Stride(NV15/20/30)</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QComboBox" name="yuvFormatComboBox">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;What is the source format of the YUV file? E.g: The subsampling and bit depth. Select one of the predefined formats or select 'custom...' to define a custom format.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_2">
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If the color components are subsampled, how should interpolation to the full resolution be performed?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="text">
+          <string>Chroma Interpolation</string>
          </property>
         </widget>
        </item>
        <item row="4" column="1">
-        <widget class="QSpinBox" name="byteStrideSpinBox"/>
+        <widget class="QSpinBox" name="byteStrideYSpinBox"/>
+       </item>
+       <item row="5" column="0">
+        <widget class="QLabel" name="label_10">
+         <property name="text">
+          <string>UV Byte Stride(NV15/20/30)</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="1">
+        <widget class="QSpinBox" name="byteStrideUVSpinBox"/>
        </item>
       </layout>
      </item>
