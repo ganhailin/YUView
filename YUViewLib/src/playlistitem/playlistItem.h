@@ -115,6 +115,7 @@ public:
 
   // Set the name of the item. This is also the name that is shown in the tree view
   void setName(const QString &name);
+  const QString getName() const { return this->prop.name; }
 
   // After loading the playlist, this playlistID has to be reset because it is only valid within
   // this playlist. If another

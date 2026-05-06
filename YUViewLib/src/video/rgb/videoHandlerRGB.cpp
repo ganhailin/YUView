@@ -42,6 +42,7 @@
 #include <video/rgb/videoHandlerRGBCustomFormatDialog.h>
 
 #include <QPainter>
+#include <QMutexLocker>
 #include <QtGlobal>
 
 namespace video::rgb
@@ -130,9 +131,9 @@ videoHandlerRGB::videoHandlerRGB() : videoHandler()
 
 videoHandlerRGB::~videoHandlerRGB()
 {
-  // This will cause a "QMutex: destroying locked mutex" warning by Qt.
-  // However, here this is on purpose.
-  rgbFormatMutex.lock();
+  // Wait for any ongoing background caching operation to complete.
+  // When the lock goes out of scope, the mutex will be unlocked automatically.
+  QMutexLocker lock(&rgbFormatMutex);
 }
 
 unsigned videoHandlerRGB::getCachingFrameSize() const
@@ -949,19 +950,31 @@ QImage videoHandlerRGB::calculateDifference(FrameHandler    *item2,
         srcB1 = (unsigned short *)rgbItem2->currentFrameRawData.data() + posB;
       }
 
+      const auto bufferSize0 = currentFrameRawData.size();
+      const auto bufferSize1 = rgbItem2->currentFrameRawData.size();
+
       for (int y = 0; y < height; y++)
       {
         for (int x = 0; x < width; x++)
         {
           unsigned int offsetCoordinate = frameSize.width * y + x;
+          unsigned int idx = offsetToNextValue * offsetCoordinate;
 
-          unsigned int R0 = (unsigned int)(*(srcR0 + offsetToNextValue * offsetCoordinate));
-          unsigned int G0 = (unsigned int)(*(srcG0 + offsetToNextValue * offsetCoordinate));
-          unsigned int B0 = (unsigned int)(*(srcB0 + offsetToNextValue * offsetCoordinate));
+          unsigned int R0 = 0, G0 = 0, B0 = 0;
+          if ((srcR0 - (unsigned short *)currentFrameRawData.constData()) * sizeof(unsigned short) + idx * sizeof(unsigned short) < static_cast<size_t>(bufferSize0))
+            R0 = (unsigned int)(*(srcR0 + idx));
+          if ((srcG0 - (unsigned short *)currentFrameRawData.constData()) * sizeof(unsigned short) + idx * sizeof(unsigned short) < static_cast<size_t>(bufferSize0))
+            G0 = (unsigned int)(*(srcG0 + idx));
+          if ((srcB0 - (unsigned short *)currentFrameRawData.constData()) * sizeof(unsigned short) + idx * sizeof(unsigned short) < static_cast<size_t>(bufferSize0))
+            B0 = (unsigned int)(*(srcB0 + idx));
 
-          unsigned int R1 = (unsigned int)(*(srcR1 + offsetToNextValue * offsetCoordinate));
-          unsigned int G1 = (unsigned int)(*(srcG1 + offsetToNextValue * offsetCoordinate));
-          unsigned int B1 = (unsigned int)(*(srcB1 + offsetToNextValue * offsetCoordinate));
+          unsigned int R1 = 0, G1 = 0, B1 = 0;
+          if ((srcR1 - (unsigned short *)rgbItem2->currentFrameRawData.constData()) * sizeof(unsigned short) + idx * sizeof(unsigned short) < static_cast<size_t>(bufferSize1))
+            R1 = (unsigned int)(*(srcR1 + idx));
+          if ((srcG1 - (unsigned short *)rgbItem2->currentFrameRawData.constData()) * sizeof(unsigned short) + idx * sizeof(unsigned short) < static_cast<size_t>(bufferSize1))
+            G1 = (unsigned int)(*(srcG1 + idx));
+          if ((srcB1 - (unsigned short *)rgbItem2->currentFrameRawData.constData()) * sizeof(unsigned short) + idx * sizeof(unsigned short) < static_cast<size_t>(bufferSize1))
+            B1 = (unsigned int)(*(srcB1 + idx));
 
           int deltaR = R0 - R1;
           int deltaG = G0 - G1;
@@ -1028,19 +1041,31 @@ QImage videoHandlerRGB::calculateDifference(FrameHandler    *item2,
         srcB1 = (unsigned char *)rgbItem2->currentFrameRawData.data() + posB;
       }
 
+      const auto bufferSize0 = currentFrameRawData.size();
+      const auto bufferSize1 = rgbItem2->currentFrameRawData.size();
+
       for (int y = 0; y < height; y++)
       {
         for (int x = 0; x < width; x++)
         {
           unsigned int offsetCoordinate = frameSize.width * y + x;
+          unsigned int idx = offsetToNextValue * offsetCoordinate;
 
-          unsigned int R0 = (unsigned int)(*(srcR0 + offsetToNextValue * offsetCoordinate));
-          unsigned int G0 = (unsigned int)(*(srcG0 + offsetToNextValue * offsetCoordinate));
-          unsigned int B0 = (unsigned int)(*(srcB0 + offsetToNextValue * offsetCoordinate));
+          unsigned int R0 = 0, G0 = 0, B0 = 0;
+          if ((srcR0 - (unsigned char *)currentFrameRawData.constData()) + idx < static_cast<size_t>(bufferSize0))
+            R0 = (unsigned int)(*(srcR0 + idx));
+          if ((srcG0 - (unsigned char *)currentFrameRawData.constData()) + idx < static_cast<size_t>(bufferSize0))
+            G0 = (unsigned int)(*(srcG0 + idx));
+          if ((srcB0 - (unsigned char *)currentFrameRawData.constData()) + idx < static_cast<size_t>(bufferSize0))
+            B0 = (unsigned int)(*(srcB0 + idx));
 
-          unsigned int R1 = (unsigned int)(*(srcR1 + offsetToNextValue * offsetCoordinate));
-          unsigned int G1 = (unsigned int)(*(srcG1 + offsetToNextValue * offsetCoordinate));
-          unsigned int B1 = (unsigned int)(*(srcB1 + offsetToNextValue * offsetCoordinate));
+          unsigned int R1 = 0, G1 = 0, B1 = 0;
+          if ((srcR1 - (unsigned char *)rgbItem2->currentFrameRawData.constData()) + idx < static_cast<size_t>(bufferSize1))
+            R1 = (unsigned int)(*(srcR1 + idx));
+          if ((srcG1 - (unsigned char *)rgbItem2->currentFrameRawData.constData()) + idx < static_cast<size_t>(bufferSize1))
+            G1 = (unsigned int)(*(srcG1 + idx));
+          if ((srcB1 - (unsigned char *)rgbItem2->currentFrameRawData.constData()) + idx < static_cast<size_t>(bufferSize1))
+            B1 = (unsigned int)(*(srcB1 + idx));
 
           int deltaR = R0 - R1;
           int deltaG = G0 - G1;

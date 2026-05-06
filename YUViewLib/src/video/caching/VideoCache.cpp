@@ -29,7 +29,7 @@
  *   You should have received a copy of the GNU General Public License
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
+#include <cinttypes>
 #include "VideoCache.h"
 
 #include <QMessageBox>
@@ -39,21 +39,12 @@
 #include <QThread>
 #include <algorithm>
 
-#include <common/Functions.h>
-#include <playlistitem/playlistItem.h>
-#include <ui/PlaybackController.h>
-
-#include "LoadingWorker.h"
-
-namespace video
-{
-
 // This debug setting has two values:
 // 1: Basic operation is written to qDebug: If a new item is selected, what is the decision to
 // cache/remove next?
 //    When is caching of a frame started?
 // 2: Show all details. What are the threads doing when? What is removed when? ...
-#define CACHING_DEBUG_OUTPUT 0
+#define CACHING_DEBUG_OUTPUT 2
 #if CACHING_DEBUG_OUTPUT && !NDEBUG
 #include <QDebug>
 #define DEBUG_CACHING qDebug
@@ -66,6 +57,16 @@ namespace video
 #define DEBUG_CACHING(fmt, ...) ((void)0)
 #define DEBUG_CACHING_DETAIL(fmt, ...) ((void)0)
 #endif
+
+#include <common/Functions.h>
+#include <playlistitem/playlistItem.h>
+#include <ui/PlaybackController.h>
+
+#include "LoadingWorker.h"
+
+namespace video
+{
+
 
 #define CACHING_THREAD_JOBS_OUTPUT 0
 #if CACHING_THREAD_JOBS_OUTPUT && !NDEBUG
@@ -762,7 +763,7 @@ void VideoCache::updateCacheQueue()
             // Only a part of the item fits.
             int64_t nrFramesCachable =
               (cacheLevelMax - cacheLevelWithoutCurrent) / allItems[i]->getCachingFrameSize();
-            DEBUG_CACHING("VideoCache::updateCacheQueue Only %lld frames of next item %s fit.",
+            DEBUG_CACHING("VideoCache::updateCacheQueue Only %" PRIi64" frames of next item %s fit.",
                           nrFramesCachable,
                           allItems[i]->getName().toLatin1().data());
             range.second = range.first + nrFramesCachable - 1;
@@ -892,7 +893,7 @@ void VideoCache::threadCachingFinished()
   {
     DEBUG_CACHING_DETAIL("VideoCache::threadCachingFinished WorkerList - worker %p - working %d",
                          thread,
-                         t->worker()->isWorking());
+                         thread->worker()->isWorking());
     if (thread->worker()->isWorking())
       // A job is still running. Wait.
       jobsRunning = true;

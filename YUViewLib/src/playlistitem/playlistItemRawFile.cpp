@@ -552,8 +552,12 @@ void playlistItemRawFile::loadRawData(int frameIdx)
 
   DEBUG_RAWFILE("playlistItemRawFile::loadRawData Start loading frame " << frameIdx << " bytes "
                                                                         << int(nrBytes));
-  if (this->dataSource.readBytes(this->video->rawData, fileStartPos, nrBytes) < nrBytes)
-    return; // Error
+  int64_t bytesRead = this->dataSource.readBytes(this->video->rawData, fileStartPos, nrBytes);
+  if (bytesRead < nrBytes)
+  {
+    this->video->rawData.resize(nrBytes);
+    memset(this->video->rawData.data() + bytesRead, 0, nrBytes - bytesRead);
+  }
   this->video->rawData_frameIndex = frameIdx;
 
   DEBUG_RAWFILE("playlistItemRawFile::loadRawData Frame " << frameIdx << " loaded");

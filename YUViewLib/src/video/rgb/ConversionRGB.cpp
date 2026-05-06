@@ -229,7 +229,11 @@ rgba_t getPixelValue(const QByteArray     &sourceBuffer,
     const auto offset = getOffsetToFirstByteOfComponent(channel, srcPixelFormat, frameSize);
 
     auto src = srcPixel + offset;
-    auto val = (unsigned)src[0];
+    auto val = 0;
+    if((src - rawData)*sizeof(rawData[0]) < sourceBuffer.size())
+    {
+      val = (unsigned)src[0];
+    }
     if (bitDepth > 8 && srcPixelFormat.getEndianess() == Endianness::Big)
       val = swapBytesEndianess<bitDepth>(val);
     value[channel] = val;

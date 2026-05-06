@@ -50,6 +50,13 @@
 #include <video/LimitedRangeToFullRange.h>
 #include <video/yuv/PixelFormatYUVGuess.h>
 #include <video/yuv/videoHandlerYUVCustomFormatDialog.h>
+#define VIDEOHANDLERYUV_DEBUG_LOADING 1
+#if VIDEOHANDLERYUV_DEBUG_LOADING && !NDEBUG
+#include <QDebug>
+#define DEBUG_YUV(message) qDebug() << message;
+#else
+#define DEBUG_YUV(message) ((void)0)
+#endif
 
 using namespace std::string_view_literals;
 
@@ -57,13 +64,6 @@ namespace video::yuv
 {
 
 // Activate this if you want to know when which buffer is loaded/converted to image and so on.
-#define VIDEOHANDLERYUV_DEBUG_LOADING 0
-#if VIDEOHANDLERYUV_DEBUG_LOADING && !NDEBUG
-#include <QDebug>
-#define DEBUG_YUV(message) qDebug() << message;
-#else
-#define DEBUG_YUV(message) ((void)0)
-#endif
 
 // Restrict is basically a promise to the compiler that for the scope of the pointer, the target of
 // the pointer will only be accessed through that pointer (and pointers copied from it).
@@ -3769,6 +3769,12 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
   if (loadToDoubleBuffer)
   {
     QImage newImage;
+    auto inputSize = this->srcPixelFormat.bytesPerFrame(this->frameSize, 0);
+    if (this->currentFrameRawData.size() < inputSize)
+    {
+      this->currentFrameRawData.resize(inputSize);
+    }
+
     convertYUVToImage(this->currentFrameRawData,
                       newImage,
                       this->srcPixelFormat,
@@ -3781,6 +3787,12 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
   else if (currentImageIndex != frameIndex)
   {
     QImage newImage;
+    auto inputSize = this->srcPixelFormat.bytesPerFrame(this->frameSize, 0);
+    if (this->currentFrameRawData.size() < inputSize)
+    {
+      this->currentFrameRawData.resize(inputSize);
+    }
+
     convertYUVToImage(this->currentFrameRawData,
                       newImage,
                       this->srcPixelFormat,
@@ -3815,6 +3827,11 @@ void videoHandlerYUV::loadFrameForCaching(int frameIndex, QImage &frameToCache)
     return;
   }
 
+  auto inputSize = yuvFormat.bytesPerFrame(curFrameSize, 0);
+  if (tmpBufferRawYUVDataCaching.size() < inputSize)
+  {
+    tmpBufferRawYUVDataCaching.resize(inputSize);
+  }
   // Convert YUV to image. This can then be cached.
   convertYUVToImage(tmpBufferRawYUVDataCaching,
                     frameToCache,
@@ -3841,6 +3858,7 @@ bool videoHandlerYUV::loadRawYUVData(int frameIndex)
   if (frameIndex != rawData_frameIndex || rawData.isEmpty())
   {
     // Loading failed
+    qDebug() << "videoHandlerYUV empty:" << rawData.isEmpty() << " frameindex:" << frameIndex << " rawData_frameIndex:" << rawData_frameIndex;
     DEBUG_YUV("videoHandlerYUV::loadRawYUVData Loading failed");
     requestDataMutex.unlock();
     return false;
@@ -3893,8 +3911,14 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
     // Luma first
     const unsigned char *restrict srcY   = (unsigned char *)currentFrameRawData.data();
     const unsigned int offsetCoordinateY = w * pixelPos.y() + pixelPos.x();
-    value.Y                              = getValueFromSource(
-        srcY, offsetCoordinateY, format.getBitsPerSample(), format.isBigEndian());
+    const auto         bytesPerYValue    = format.getBitsPerSample() > 8 ? 2 : 1;
+    if ((srcY - (const unsigned char *)currentFrameRawData.constData()) * sizeof(unsigned char) +
+            offsetCoordinateY * bytesPerYValue <=
+        static_cast<size_t>(currentFrameRawData.size()))
+    {
+      value.Y = getValueFromSource(
+          srcY, offsetCoordinateY, format.getBitsPerSample(), format.isBigEndian());
+    }
 
     if (format.getSubsampling() != Subsampling::YUV_400)
     {
@@ -3913,14 +3937,20 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
              pixelPos.x() / format.getSubsamplingHor()) *
             mult;
 
-        value.U = getValueFromSource(srcUVA,
-                                     offsetCoordinateUV + (uFirst ? 0 : 1),
-                                     format.getBitsPerSample(),
-                                     format.isBigEndian());
-        value.V = getValueFromSource(srcUVA,
-                                     offsetCoordinateUV + (uFirst ? 1 : 0),
-                                     format.getBitsPerSample(),
-                                     format.isBigEndian());
+        const auto bytesPerUVValue = format.getBitsPerSample() > 8 ? 2 : 1;
+        if ((srcUVA - (const unsigned char *)currentFrameRawData.constData()) * sizeof(unsigned char) +
+                (offsetCoordinateUV + 1) * bytesPerUVValue <=
+            static_cast<size_t>(currentFrameRawData.size()))
+        {
+          value.U = getValueFromSource(srcUVA,
+                                       offsetCoordinateUV + (uFirst ? 0 : 1),
+                                       format.getBitsPerSample(),
+                                       format.isBigEndian());
+          value.V = getValueFromSource(srcUVA,
+                                       offsetCoordinateUV + (uFirst ? 1 : 0),
+                                       format.getBitsPerSample(),
+                                       format.isBigEndian());
+        }
       }
       else
       {
@@ -3934,10 +3964,21 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
             (w / format.getSubsamplingHor() * (pixelPos.y() / format.getSubsamplingVer())) +
             pixelPos.x() / format.getSubsamplingHor();
 
-        value.U = getValueFromSource(
-            srcU, offsetCoordinateUV, format.getBitsPerSample(), format.isBigEndian());
-        value.V = getValueFromSource(
-            srcV, offsetCoordinateUV, format.getBitsPerSample(), format.isBigEndian());
+        const auto bytesPerUVValue = format.getBitsPerSample() > 8 ? 2 : 1;
+        if ((srcU - (const unsigned char *)currentFrameRawData.constData()) * sizeof(unsigned char) +
+                offsetCoordinateUV * bytesPerUVValue <=
+            static_cast<size_t>(currentFrameRawData.size()))
+        {
+          value.U = getValueFromSource(
+              srcU, offsetCoordinateUV, format.getBitsPerSample(), format.isBigEndian());
+        }
+        if ((srcV - (const unsigned char *)currentFrameRawData.constData()) * sizeof(unsigned char) +
+                offsetCoordinateUV * bytesPerUVValue <=
+            static_cast<size_t>(currentFrameRawData.size()))
+        {
+          value.V = getValueFromSource(
+              srcV, offsetCoordinateUV, format.getBitsPerSample(), format.isBigEndian());
+        }
       }
     }
   }
@@ -3965,18 +4006,21 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
         const unsigned char *restrict src =
             (unsigned char *)currentFrameRawData.data() + offsetInInput;
 
-        unsigned short values[4];
-        values[0] = (src[0] << 2) + (src[1] >> 6);
-        values[1] = ((src[1] & 0x3f) << 4) + (src[2] >> 4);
-        values[2] = ((src[2] & 0x0f) << 6) + (src[3] >> 2);
-        values[3] = ((src[3] & 0x03) << 8) + src[4];
+        if (offsetInInput + 5 <= static_cast<size_t>(currentFrameRawData.size()))
+        {
+          unsigned short values[4];
+          values[0] = (src[0] << 2) + (src[1] >> 6);
+          values[1] = ((src[1] & 0x3f) << 4) + (src[2] >> 4);
+          values[2] = ((src[2] & 0x0f) << 6) + (src[3] >> 2);
+          values[3] = ((src[3] & 0x03) << 8) + src[4];
 
-        if (pixelPos.x() % 2 == 0)
-          value.Y = values[oY];
-        else
-          value.Y = values[oY + 2];
-        value.U = values[oU];
-        value.V = values[oV];
+          if (pixelPos.x() % 2 == 0)
+            value.Y = values[oY];
+          else
+            value.Y = values[oY + 2];
+          value.U = values[oU];
+          value.V = values[oV];
+        }
       }
       else
       {
@@ -3986,12 +4030,18 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
         const unsigned char *restrict src =
             (unsigned char *)currentFrameRawData.data() + offsetCoordinate4Block;
 
-        value.Y = getValueFromSource(src,
-                                     (pixelPos.x() % 2 == 0) ? oY : oY + 2,
-                                     format.getBitsPerSample(),
-                                     format.isBigEndian());
-        value.U = getValueFromSource(src, oU, format.getBitsPerSample(), format.isBigEndian());
-        value.V = getValueFromSource(src, oV, format.getBitsPerSample(), format.isBigEndian());
+        const auto bytesPerValue = format.getBitsPerSample() > 8 ? 2 : 1;
+        const int  maxOffset     = std::max({oY, oY + 2, oU, oV});
+        if (offsetCoordinate4Block + (maxOffset + 1) * bytesPerValue <=
+            static_cast<size_t>(currentFrameRawData.size()))
+        {
+          value.Y = getValueFromSource(src,
+                                       (pixelPos.x() % 2 == 0) ? oY : oY + 2,
+                                       format.getBitsPerSample(),
+                                       format.isBigEndian());
+          value.U = getValueFromSource(src, oU, format.getBitsPerSample(), format.isBigEndian());
+          value.V = getValueFromSource(src, oV, format.getBitsPerSample(), format.isBigEndian());
+        }
       }
     }
     else if (format.getSubsampling() == Subsampling::YUV_444)
@@ -4015,9 +4065,14 @@ yuv_t videoHandlerYUV::getPixelValue(const QPoint &pixelPos) const
       const int offsetSrc               = (w * pixelPos.y() + pixelPos.x()) * offsetNext;
       const unsigned char *restrict src = (unsigned char *)currentFrameRawData.data() + offsetSrc;
 
-      value.Y = getValueFromSource(src, oY, format.getBitsPerSample(), format.isBigEndian());
-      value.U = getValueFromSource(src, oU, format.getBitsPerSample(), format.isBigEndian());
-      value.V = getValueFromSource(src, oV, format.getBitsPerSample(), format.isBigEndian());
+      const auto bytesPerValue = format.getBitsPerSample() > 8 ? 2 : 1;
+      const int  maxOffset     = std::max({oY, oU, oV});
+      if (offsetSrc + (maxOffset + 1) * bytesPerValue <= static_cast<size_t>(currentFrameRawData.size()))
+      {
+        value.Y = getValueFromSource(src, oY, format.getBitsPerSample(), format.isBigEndian());
+        value.U = getValueFromSource(src, oU, format.getBitsPerSample(), format.isBigEndian());
+        value.V = getValueFromSource(src, oV, format.getBitsPerSample(), format.isBigEndian());
+      }
     }
   }
 
