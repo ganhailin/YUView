@@ -41,6 +41,7 @@
 #include <QObject>
 #include <QSettings>
 
+#include "VideoFrame.h"
 #include "ui_FrameHandler.h"
 
 namespace video
@@ -125,6 +126,9 @@ public:
 
   QImage getCurrentFrameAsImage() const { return currentImage; }
 
+  // Get the current frame as a VideoFrame (includes both 8-bit and 16-bit data)
+  VideoFrame getCurrentFrameAsVideoFrame() const;
+
   // Load the current image from file and set the correct size.
   bool loadCurrentImageFromFile(const QString &filePath);
 
@@ -138,6 +142,7 @@ signals:
 
 protected:
   QImage currentImage;
+  VideoFrame currentVideoFrame;
   Size   frameSize;
 
   // Get the pixel value from currentImage. Make sure that currentImage is the correct image.

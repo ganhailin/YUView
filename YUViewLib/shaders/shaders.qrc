@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/shaders">
+        <file>hdr10_vertex.glsl</file>
+        <file>hdr10_fragment.glsl</file>
+        <file>hdr10_fragment_dither.glsl</file>
+    </qresource>
+</RCC>

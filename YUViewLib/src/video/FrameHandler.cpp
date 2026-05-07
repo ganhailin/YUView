@@ -279,6 +279,16 @@ void FrameHandler::drawFrame(QPainter *painter, double zoomFactor, bool drawRawV
   }
 }
 
+VideoFrame FrameHandler::getCurrentFrameAsVideoFrame() const
+{
+  // If we have a cached VideoFrame, return it
+  if (currentVideoFrame.isValid())
+    return currentVideoFrame;
+
+  // Otherwise, create a VideoFrame from the current QImage
+  return VideoFrame(currentImage);
+}
+
 void FrameHandler::drawPixelValues(QPainter *painter,
                                    const int,
                                    const QRect  &videoRect,

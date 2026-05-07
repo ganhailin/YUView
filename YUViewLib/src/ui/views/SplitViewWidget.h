@@ -35,6 +35,7 @@
 
 #include <common/SaveUi.h>
 #include <common/Typedef.h>
+#include <ui/views/HDR10Widget.h>
 #include <ui/views/MoveAndZoomableView.h>
 
 #include <QAction>
@@ -111,6 +112,20 @@ public:
     return this->zoomFactor >= SPLITVIEW_DRAW_VALUES_ZOOMFACTOR || this->drawZoomBox;
   }
 
+  // HDR rendering mode
+  enum class HDRRenderingMode
+  {
+    Disabled,     // Use standard QPainter rendering (8-bit)
+    Enabled       // Use HDR10Widget for OpenGL rendering (10-bit capable)
+  };
+
+  // Get and set the HDR rendering mode
+  HDRRenderingMode getHDRRenderingMode() const { return hdrRenderingMode; }
+  void             setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate = true);
+
+  // Check if HDR rendering is supported by the current OpenGL context
+  bool isHDRSupported() const;
+
   // Test the drawing speed with the currently selected item
   void testDrawingSpeed();
 
@@ -153,6 +168,8 @@ private slots:
   void toggleSeparateWindow(bool checked);
   void toggleSeparateWindowPlaybackBoth(bool){};
   void toggleFullScreen(bool checked);
+  void toggleHDRRendering(bool checked);
+  void toggleHDRDithering(bool checked);
 
 protected:
   // Set the widget to the given view mode
@@ -196,6 +213,8 @@ protected:
   QAction                       actionSeparateViewPlaybackBoth;
   QAction                       actionZoomBox;
   QAction                       actionFullScreen;
+  QAction                       actionHDRRendering;
+  QAction                       actionHDRDithering;
 
   void         updateMouseTracking();
   virtual bool updateMouseCursor(const QPoint &srcMousePos) override;
@@ -275,6 +294,10 @@ protected:
   QPointer<PlaylistTreeWidget> playlist;
   QPointer<PlaybackController> playback;
   QPointer<video::VideoCache>  cache;
+
+  // HDR rendering
+  HDRRenderingMode                      hdrRenderingMode{HDRRenderingMode::Disabled};
+  std::unique_ptr<video::HDR10Widget>   hdr10Widget;
 
   // Freezing of the view
   bool isViewFrozen{false}; //!< Is the view frozen?

@@ -34,6 +34,7 @@
 
 #include <playlistitem/playlistItem.h>
 #include <ui/PlaybackController.h>
+#include <ui/views/HDR10Widget.h>
 #include <video/FrameHandler.h>
 #include <video/caching/VideoCache.h>
 
@@ -147,8 +148,59 @@ void splitViewWidget::updateSettings()
   zoomBoxBackgroundColor     = settings.value(paletteBackgroundColorSettingsTag).value<QColor>();
   drawItemPathAndNameEnabled = settings.value("ShowFilePathInSplitMode", true).toBool();
 
+  // Load HDR rendering mode from settings
+  bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+  setHDRRenderingMode(hdrEnabled ? HDRRenderingMode::Enabled : HDRRenderingMode::Disabled, false);
+
   // Something about how we draw might have been changed
   update();
+}
+
+void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate)
+{
+  if (hdrRenderingMode == mode)
+    return;
+
+  hdrRenderingMode = mode;
+
+  if (mode == HDRRenderingMode::Enabled)
+  {
+    // Create HDR10Widget if it doesn't exist
+    if (!hdr10Widget)
+    {
+      hdr10Widget = std::make_unique<video::HDR10Widget>(this);
+      hdr10Widget->setParent(this);
+      // Position the HDR widget to cover the entire widget area
+      // It will be raised below the QPainter overlays
+      hdr10Widget->raise();
+
+      // Initialize zoom and offset
+      hdr10Widget->setZoom(this->zoomFactor);
+      hdr10Widget->setMoveOffset(this->moveOffset);
+
+      // Apply saved dithering setting
+      QSettings ditherSettings;
+      bool ditheringEnabled = ditherSettings.value("View/HDRDithering", false).toBool();
+      hdr10Widget->setDithering(ditheringEnabled);
+      actionHDRDithering.setChecked(ditheringEnabled);
+    }
+    hdr10Widget->show();
+  }
+  else
+  {
+    // Hide HDR10Widget
+    if (hdr10Widget)
+      hdr10Widget->hide();
+  }
+
+  if (callUpdate)
+    update();
+}
+
+bool splitViewWidget::isHDRSupported() const
+{
+  // HDR is supported if we have an HDR10Widget and it supports 10-bit output
+  return hdr10Widget && hdr10Widget->supports10bit();
 }
 
 void splitViewWidget::paintEvent(QPaintEvent *)
@@ -402,11 +454,32 @@ void splitViewWidget::paintEvent(QPaintEvent *)
     {
       centerPoints[0] = drawArea_botR / 2;
 
+      // HDR rendering: Use HDR10Widget if enabled
+      if (hdrRenderingMode == HDRRenderingMode::Enabled && hdr10Widget && !waitingForCaching)
+      {
+        // Position HDR10Widget to cover the drawing area
+        hdr10Widget->setGeometry(0, 0, width(), height());
+
+        // Get the frame from the playlist item and pass it to HDR10Widget
+        if (auto frameHandler = item[0]->getFrameHandler())
+        {
+          video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
+          hdr10Widget->setFrame(videoFrame);
+        }
+      }
+      else
+      {
+        // Hide HDR10Widget when not in HDR mode
+        if (hdr10Widget)
+          hdr10Widget->hide();
+      }
+
       // Translate the painter to the position where we want the item to be
       painter.translate(centerPoints[0] + offset);
 
-      // Draw the item at position (0,0)
-      if (!waitingForCaching)
+      // Draw the item at position (0,0) - only if not using HDR rendering
+      // (HDR10Widget already rendered the frame)
+      if (!waitingForCaching && hdrRenderingMode != HDRRenderingMode::Enabled)
       {
         painter.setFont(
             QFont(SPLITVIEWWIDGET_PIXEL_VALUES_FONT, SPLITVIEWWIDGET_PIXEL_VALUES_FONTSIZE));
@@ -1054,6 +1127,10 @@ void splitViewWidget::setMoveOffset(QPointF offset)
 {
   MoveAndZoomableView::setMoveOffset(offset);
 
+  // Update HDR10Widget with new offset
+  if (hdr10Widget)
+    hdr10Widget->setMoveOffset(offset);
+
   if (this->isMasterView)
   {
     // Save the center offset in the currently selected item
@@ -1119,6 +1196,10 @@ void splitViewWidget::setSplittingPoint(double point, bool setLinkedViews)
 void splitViewWidget::setZoomFactor(double zoom)
 {
   MoveAndZoomableView::setZoomFactor(zoom);
+
+  // Update HDR10Widget with new zoom
+  if (hdr10Widget)
+    hdr10Widget->setZoom(zoom);
 
   if (this->isMasterView)
   {
@@ -1233,6 +1314,28 @@ void splitViewWidget::toggleSeparateWindow(bool checked)
 void splitViewWidget::toggleFullScreen(bool)
 {
   emit this->signalToggleFullScreen();
+}
+
+void splitViewWidget::toggleHDRRendering(bool checked)
+{
+  setHDRRenderingMode(checked ? HDRRenderingMode::Enabled : HDRRenderingMode::Disabled);
+
+  // Enable/disable dithering action based on HDR mode
+  actionHDRDithering.setEnabled(checked);
+
+  // Save the setting
+  QSettings settings;
+  settings.setValue("View/HDRRendering", checked);
+}
+
+void splitViewWidget::toggleHDRDithering(bool checked)
+{
+  if (hdr10Widget)
+    hdr10Widget->setDithering(checked);
+
+  // Save the setting
+  QSettings settings;
+  settings.setValue("View/HDRDithering", checked);
 }
 
 void splitViewWidget::resetViewInternal()
@@ -1761,6 +1864,27 @@ void splitViewWidget::createMenuActions()
   actionZoomBox.setToolTip("Activate the Zoom Box which renders a zoomed portion of the screen and "
                            "shows pixel information.");
 
+  // HDR rendering action
+  configureAction(this->actionHDRRendering,
+                  nullptr,
+                  "HDR 10-bit Rendering",
+                  Checkable(true),
+                  Checkable(this->hdrRenderingMode == HDRRenderingMode::Enabled),
+                  &splitViewWidget::toggleHDRRendering);
+  actionHDRRendering.setToolTip("Enable HDR 10-bit rendering using OpenGL. Requires a 10-bit "
+                                "capable display and GPU for true 10-bit output.");
+
+  // HDR dithering action
+  configureAction(this->actionHDRDithering,
+                  nullptr,
+                  "HDR Dithering",
+                  Checkable(true),
+                  Checked(false),
+                  &splitViewWidget::toggleHDRDithering);
+  actionHDRDithering.setToolTip("Enable Bayer dithering for HDR rendering to reduce banding on "
+                                "8-bit displays.");
+  actionHDRDithering.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
+
   if (this->isMasterView)
   {
     configureAction(this->actionSeparateView,
@@ -1989,6 +2113,8 @@ void splitViewWidget::addMenuActions(QMenu *menu)
     drawGridMenu->addAction(&action);
 
   menu->addAction(&actionZoomBox);
+  menu->addAction(&actionHDRRendering);
+  menu->addAction(&actionHDRDithering);
 
   auto separateViewMenu = menu->addMenu("Separate View");
   separateViewMenu->addAction(!isMasterView ? &this->getOtherWidget()->actionSeparateView
