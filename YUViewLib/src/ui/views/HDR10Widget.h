@@ -100,7 +100,8 @@ private:
   bool       m_frameNeedsUpdate{false};
   QSize      m_frameSize;
 
-  int  m_bitDepth{10};
+  int  m_bitDepth{10};           // Display/render bit depth (for OpenGL shader normalization)
+  int  m_sourceBitDepth{8};      // Source bit depth (for pixel value display)
   bool m_ditheringEnabled{false};
   bool m_initialized{false};
   bool m_supports10bit{false};

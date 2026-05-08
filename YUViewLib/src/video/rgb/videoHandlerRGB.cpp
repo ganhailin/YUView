@@ -470,6 +470,8 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     convertRGBToImage(currentFrameRawData, newImage);
     doubleBufferImage           = newImage;
     doubleBufferImageFrameIndex = frameIndex;
+    // Note: We don't set doubleBufferVideoFrame here as it doesn't exist.
+    // Double buffering is for caching, HDR rendering uses current frame.
   }
   else if (currentImageIndex != frameIndex)
   {
@@ -478,6 +480,30 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     QMutexLocker writeLock(&currentImageSetMutex);
     currentImage      = newImage;
     currentImageIndex = frameIndex;
+
+    // For high bit-depth sources (>8 bits), also generate a real 16-bit buffer for HDR rendering
+    // This provides true high-bit-depth data to HDR10Widget instead of 8-bit expanded data
+    if (srcPixelFormat.getBitsPerSample() > 8)
+    {
+      const auto numPixels = frameSize.width * frameSize.height;
+      QVector<uint16_t> buffer16bit(numPixels * 4); // RGBA
+      convertRGBTo16BitRGBA(currentFrameRawData,
+                            srcPixelFormat,
+                            buffer16bit.data(),
+                            frameSize,
+                            componentInvert,
+                            componentScale,
+                            limitedRange);
+      currentVideoFrame.set16bitBuffer(std::move(buffer16bit),
+                                       static_cast<int>(frameSize.width),
+                                       static_cast<int>(frameSize.height));
+    }
+    else
+    {
+      // For 8-bit sources, clear any existing 16-bit buffer to save memory
+      // HDR10Widget will call generate16bitBuffer() if needed (8-bit compatibility)
+      currentVideoFrame.clear();
+    }
   }
 }
 

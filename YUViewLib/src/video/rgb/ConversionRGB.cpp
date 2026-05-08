@@ -349,4 +349,139 @@ rgba_t getPixelValueFromBuffer(const QByteArray     &sourceBuffer,
     return getPixelValue<32>(sourceBuffer, srcPixelFormat, frameSize, pixelPos);
 }
 
+// Convert input RGB data to 16-bit RGBA output for HDR rendering.
+// Template parameter bitDepth is the bit depth of the input data (8, 16, or 32).
+// Output is always 16-bit per channel in RGBA order.
+template <int bitDepth>
+void convertRGBTo16BitRGBAInternal(const QByteArray     &sourceBuffer,
+                                   const PixelFormatRGB &srcPixelFormat,
+                                   uint16_t             *targetBuffer,
+                                   const Size            frameSize,
+                                   const bool            componentInvert[4],
+                                   const int             componentScale[4],
+                                   const bool            limitedRange)
+{
+  // Calculate the shift needed to scale input values to 16-bit
+  // For 8-bit: shift by 8 (<< 8) to get 16-bit
+  // For 10-bit: shift by 6 (<< 6) to get 16-bit
+  // For 12-bit: shift by 4 (<< 4) to get 16-bit
+  // For 16-bit: shift by 0 (no shift)
+  const auto inputBits = srcPixelFormat.getBitsPerSample();
+  const auto shiftTo16 = 16 - inputBits;
+
+  const auto offsetToNextValue =
+      srcPixelFormat.getDataLayout() == DataLayout::Planar ? 1 : srcPixelFormat.nrChannels();
+
+  using InValueType = UintValueType<bitDepth>;
+
+  const auto rawData = (InValueType)sourceBuffer.data();
+
+  auto srcR = rawData + getOffsetToFirstByteOfComponent(Channel::Red, srcPixelFormat, frameSize);
+  auto srcG = rawData + getOffsetToFirstByteOfComponent(Channel::Green, srcPixelFormat, frameSize);
+  auto srcB = rawData + getOffsetToFirstByteOfComponent(Channel::Blue, srcPixelFormat, frameSize);
+
+  // Handle alpha channel
+  const auto setAlpha = srcPixelFormat.hasAlpha();
+  InValueType srcA    = nullptr;
+  int         alphaPos;
+  if (setAlpha)
+  {
+    alphaPos = srcPixelFormat.getChannelPosition(Channel::Alpha);
+    if (srcPixelFormat.getDataLayout() == DataLayout::Planar)
+      alphaPos *= frameSize.width * frameSize.height;
+    srcA = ((InValueType)sourceBuffer.data()) + alphaPos;
+  }
+
+  for (unsigned i = 0; i < frameSize.width * frameSize.height; i++)
+  {
+    const auto isBigEndian = bitDepth > 8 && srcPixelFormat.getEndianess() == Endianness::Big;
+
+    auto convertValue =
+        [&isBigEndian, &shiftTo16](const InValueType sourceData, const int scale, const bool invert)
+    {
+      auto value = static_cast<int64_t>(sourceData[0]);
+      if (isBigEndian)
+        value = swapBytesEndianess<bitDepth>(value);
+
+      // Apply scale first, then shift to 16-bit
+      value = (value * scale) << shiftTo16;
+      value = functions::clip(value, 0, 65535);
+
+      if (invert)
+        value = 65535 - value;
+      return static_cast<uint16_t>(value);
+    };
+
+    auto valR = convertValue(srcR, componentScale[0], componentInvert[0]);
+    auto valG = convertValue(srcG, componentScale[1], componentInvert[1]);
+    auto valB = convertValue(srcB, componentScale[2], componentInvert[2]);
+
+    if (limitedRange)
+    {
+      // Apply limited range to full range conversion for 16-bit values
+      // Limited range for N-bit is [16 << (N-8), 235 << (N-8)]
+      // For 16-bit: [4096, 60160]
+      const auto limitedMin   = 4096;   // 16 << 8
+      const auto limitedMax   = 60160;  // 235 << 8
+      const auto fullRange    = 65535;
+      const auto limitedRange = limitedMax - limitedMin;
+
+      auto limitedToFull = [](uint16_t val, int min, int range, int full)
+      {
+        if (val <= min)
+          return uint16_t(0);
+        if (val >= min + range)
+          return uint16_t(full);
+        return uint16_t(((val - min) * full) / range);
+      };
+
+      valR = limitedToFull(valR, limitedMin, limitedRange, fullRange);
+      valG = limitedToFull(valG, limitedMin, limitedRange, fullRange);
+      valB = limitedToFull(valB, limitedMin, limitedRange, fullRange);
+    }
+
+    uint16_t valA = 65535;  // Default to fully opaque
+    if (setAlpha)
+    {
+      valA = convertValue(srcA, componentScale[3], componentInvert[3]);
+      srcA += offsetToNextValue;
+    }
+
+    srcR += offsetToNextValue;
+    srcG += offsetToNextValue;
+    srcB += offsetToNextValue;
+
+    // Output in RGBA order
+    targetBuffer[0] = valR;
+    targetBuffer[1] = valG;
+    targetBuffer[2] = valB;
+    targetBuffer[3] = valA;
+
+    targetBuffer += 4;
+  }
+}
+
+void convertRGBTo16BitRGBA(const QByteArray     &sourceBuffer,
+                           const PixelFormatRGB &srcPixelFormat,
+                           uint16_t             *targetBuffer,
+                           const Size            frameSize,
+                           const bool            componentInvert[4],
+                           const int             componentScale[4],
+                           const bool            limitedRange)
+{
+  const auto bitsPerSample = srcPixelFormat.getBitsPerSample();
+  if (bitsPerSample < 8 || bitsPerSample > 32)
+    throw std::invalid_argument("Invalid bit depth in pixel format for conversion");
+
+  if (bitsPerSample == 8)
+    convertRGBTo16BitRGBAInternal<8>(
+        sourceBuffer, srcPixelFormat, targetBuffer, frameSize, componentInvert, componentScale, limitedRange);
+  else if (bitsPerSample <= 16)
+    convertRGBTo16BitRGBAInternal<16>(
+        sourceBuffer, srcPixelFormat, targetBuffer, frameSize, componentInvert, componentScale, limitedRange);
+  else
+    convertRGBTo16BitRGBAInternal<32>(
+        sourceBuffer, srcPixelFormat, targetBuffer, frameSize, componentInvert, componentScale, limitedRange);
+}
+
 } // namespace video::rgb

@@ -206,15 +206,33 @@ void HDR10Widget::updateTexture()
   const int w = m_currentFrame.width();
   const int h = m_currentFrame.height();
 
+  // Check if VideoFrame already has a 16-bit buffer (from high bit-depth source like 10/12/16-bit RGB)
+  // If not, generate it from the 8-bit QImage (for 8-bit sources, maintains backward compatibility)
   if (!m_currentFrame.has16bitBuffer())
   {
+    // For 8-bit sources: generate expanded 16-bit buffer (r*257, etc.)
+    // This maintains backward compatibility with existing 8-bit content
     const_cast<VideoFrame &>(m_currentFrame).generate16bitBuffer();
+    // Source is 8-bit
+    m_sourceBitDepth = 8;
+  }
+  else
+  {
+    // For high bit-depth sources: the data is already in 16-bit range
+    // We store the actual source bit depth for pixel value display
+    // Note: ideally we'd detect the actual source bit depth (10/12/16) from FrameHandler
+    // For now, we assume high bit-depth sources are at least 10-bit
+    m_sourceBitDepth = 10;  // Could be refined to detect actual bit depth
   }
 
   const uint16_t *data = m_currentFrame.getData16bit();
   if (!data)
     return;
-  setBitDepth(16);
+
+  // Note: m_bitDepth remains as the DISPLAY bit depth (for shader normalization and dithering)
+  // - Standard shader: normalizes by (2^m_bitDepth - 1)
+  // - Dithering shader: dithers to m_bitDepth levels
+  // Data is always uploaded as 16-bit, so shader divides by 65535.0 first
 
   glGenTextures(1, &m_textureId);
   glBindTexture(GL_TEXTURE_2D, m_textureId);
@@ -311,7 +329,9 @@ void HDR10Widget::paintGL()
   glBindTexture(GL_TEXTURE_2D, m_textureId);
 
   glUniform1i(currentProgram->uniformLocation("texture16bit"), 0);
-  glUniform1i(currentProgram->uniformLocation("bitDepth"), m_bitDepth);
+  // Note: Both shaders now always normalize by 65535.0
+  // - Standard shader: direct normalization
+  // - Dithering shader: normalize then dither to 8-bit
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
@@ -411,7 +431,8 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
 
     QSettings settings;
     const bool showHex = settings.value("ShowPixelValuesHex", false).toBool();
-    const int maxVal = (1 << m_bitDepth) - 1;
+    // Use source bit depth for display (e.g., show 0-255 for 8-bit sources, 0-1023 for 10-bit)
+    const int maxDisplayVal = (1 << m_sourceBitDepth) - 1;
 
     for (int y = yMin; y <= yMax; ++y)
     {
@@ -429,15 +450,17 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
         uint16_t g = data[idx + 1];
         uint16_t b = data[idx + 2];
 
-        // Convert to display value based on bit depth
-        int rv = (r * maxVal) / 65535;
-        int gv = (g * maxVal) / 65535;
-        int bv = (b * maxVal) / 65535;
+        // Convert from 16-bit storage range (0-65535) to source bit depth display range
+        // e.g., for 8-bit source: (r * 255) / 65535 gives 0-255
+        // e.g., for 10-bit source: (r * 1023) / 65535 gives 0-1023
+        int rv = (r * maxDisplayVal) / 65535;
+        int gv = (g * maxDisplayVal) / 65535;
+        int bv = (b * maxDisplayVal) / 65535;
 
-        // Determine text color based on perceived brightness
+        // Determine text color based on perceived brightness (using display values)
         // Y = 0.299*R + 0.587*G + 0.114*B (ITU-R BT.601)
         int brightness = static_cast<int>(0.299 * rv + 0.587 * gv + 0.114 * bv);
-        bool isDark = brightness < (maxVal / 2);
+        bool isDark = brightness < (maxDisplayVal / 2);
         painter->setPen(isDark ? Qt::white : Qt::black);
 
         // Format text with R/G/B labels
