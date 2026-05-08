@@ -465,7 +465,11 @@ void splitViewWidget::paintEvent(QPaintEvent *)
         {
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
           hdr10Widget->setFrame(videoFrame);
+          hdr10Widget->setFrameHandler(frameHandler);  // For getting correct pixel values (YUV/RGB)
         }
+
+        // Sync pixel value display settings
+        hdr10Widget->setShowRawData(drawRawValues);
       }
       else
       {

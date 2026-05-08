@@ -38,9 +38,13 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
+#include <QWidget>
 
 namespace video
 {
+
+// Forward declaration
+class FrameHandler;
 
 class HDR10Widget : public QOpenGLWidget, protected QOpenGLFunctions
 {
@@ -51,10 +55,12 @@ public:
   ~HDR10Widget() override;
 
   void setFrame(const VideoFrame &frame);
+  void setFrameHandler(FrameHandler *handler) { m_frameHandler = handler; }
   void setBitDepth(int bits) { m_bitDepth = bits; }
   void setDithering(bool enable);
-  void setZoom(double zoom) { m_zoom = zoom; }
-  void setMoveOffset(QPointF offset) { m_moveOffset = offset; }
+  void setZoom(double zoom);
+  void setMoveOffset(QPointF offset);
+  void setShowRawData(bool show) { m_showRawData = show; updatePixelOverlay(); }
   bool supports10bit() const { return m_supports10bit; }
   QString getOpenGLInfo() const { return m_openglInfo; }
 
@@ -62,11 +68,24 @@ protected:
   void initializeGL() override;
   void resizeGL(int w, int h) override;
   void paintGL() override;
+  void updatePixelOverlay();
+  void drawPixelValues(QPainter *painter);
 
 private:
   void initShaders();
   void initGeometry();
   void updateTexture();
+
+  // Pixel overlay widget for drawing pixel values
+  class PixelOverlay : public QWidget
+  {
+  public:
+    explicit PixelOverlay(HDR10Widget *parent);
+    void paintEvent(QPaintEvent *event) override;
+
+  private:
+    HDR10Widget *hdrWidget;
+  };
 
   QOpenGLShaderProgram *m_program{nullptr};
   QOpenGLShaderProgram *m_programDither{nullptr};
@@ -83,6 +102,7 @@ private:
   bool m_ditheringEnabled{false};
   bool m_initialized{false};
   bool m_supports10bit{false};
+  bool m_showRawData{false};
 
   QString m_openglInfo;
 
@@ -91,6 +111,9 @@ private:
 
   double m_zoom{1.0};
   QPointF m_moveOffset{0, 0};
+
+  PixelOverlay *m_pixelOverlay{nullptr};
+  FrameHandler *m_frameHandler{nullptr};  // For getting original pixel values
 };
 
 } // namespace video

@@ -31,11 +31,18 @@
 
 #include "HDR10Widget.h"
 
+#include <video/FrameHandler.h>
+
 #include <QDebug>
 #include <QSurfaceFormat>
+#include <QPainter>
+#include <QSettings>
 
 namespace video
 {
+
+// Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
+static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
 
 HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
 {
@@ -47,6 +54,11 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
   format.setProfile(QSurfaceFormat::CoreProfile);
   format.setVersion(3, 3);
   setFormat(format);
+
+  // Create pixel overlay widget
+  m_pixelOverlay = new PixelOverlay(this);
+  m_pixelOverlay->setGeometry(0, 0, width(), height());
+  m_pixelOverlay->show();
 }
 
 HDR10Widget::~HDR10Widget()
@@ -71,6 +83,24 @@ void HDR10Widget::setDithering(bool enable)
 {
   m_ditheringEnabled = enable;
   update();
+}
+
+void HDR10Widget::setZoom(double zoom)
+{
+  m_zoom = zoom;
+  updatePixelOverlay();
+}
+
+void HDR10Widget::setMoveOffset(QPointF offset)
+{
+  m_moveOffset = offset;
+  updatePixelOverlay();
+}
+
+void HDR10Widget::updatePixelOverlay()
+{
+  if (m_pixelOverlay)
+    m_pixelOverlay->update();
 }
 
 void HDR10Widget::initializeGL()
@@ -204,6 +234,10 @@ void HDR10Widget::updateTexture()
 void HDR10Widget::resizeGL(int w, int h)
 {
   glViewport(0, 0, w, h);
+
+  // Update pixel overlay geometry to match
+  if (m_pixelOverlay)
+    m_pixelOverlay->setGeometry(0, 0, w, h);
 }
 
 void HDR10Widget::paintGL()
@@ -283,6 +317,152 @@ void HDR10Widget::paintGL()
 
   m_vao.release();
   currentProgram->release();
+}
+
+void HDR10Widget::drawPixelValues(QPainter *painter)
+{
+  if (!m_showRawData || m_zoom < SHOW_PIXEL_VALUES_ZOOM_THRESHOLD)
+    return;
+
+  if (!m_currentFrame.isValid() || m_frameSize.isEmpty())
+    return;
+
+  // Calculate display rect (same logic as paintGL)
+  int widgetW = width();
+  int widgetH = height();
+  int frameW = m_frameSize.width();
+  int frameH = m_frameSize.height();
+
+  double displayW = frameW * m_zoom;
+  double displayH = frameH * m_zoom;
+
+  // Calculate the video rect in widget coordinates
+  // Center of widget + offset - half display size
+  double videoLeft = widgetW * 0.5 + m_moveOffset.x() - displayW * 0.5;
+  double videoTop = widgetH * 0.5 + m_moveOffset.y() - displayH * 0.5;
+
+  // Clip to widget bounds
+  int xMin = static_cast<int>(std::max(0.0, -videoLeft / m_zoom));
+  int yMin = static_cast<int>(std::max(0.0, -videoTop / m_zoom));
+  int xMax = static_cast<int>(std::min(static_cast<double>(frameW - 1), (widgetW - videoLeft) / m_zoom));
+  int yMax = static_cast<int>(std::min(static_cast<double>(frameH - 1), (widgetH - videoTop) / m_zoom));
+
+  if (xMin > xMax || yMin > yMax)
+    return;
+
+  // Set up font (fixed size, same as SplitViewWidget)
+  QFont font = painter->font();
+  font.setPointSize(10);
+  painter->setFont(font);
+
+  // Draw pixel values using FrameHandler if available, otherwise fallback to RGB buffer
+  if (m_frameHandler)
+  {
+    // Use FrameHandler to get properly labeled pixel values (YUV or RGB)
+    for (int y = yMin; y <= yMax; ++y)
+    {
+      for (int x = xMin; x <= xMax; ++x)
+      {
+        // Calculate pixel rect in widget coordinates
+        double pxLeft = videoLeft + x * m_zoom;
+        double pxTop = videoTop + y * m_zoom;
+        QRect pixelRect(static_cast<int>(pxLeft), static_cast<int>(pxTop),
+                        static_cast<int>(m_zoom), static_cast<int>(m_zoom));
+
+        // Get pixel values from FrameHandler (this returns YUV or RGB with proper labels)
+        auto pixelValues = m_frameHandler->getPixelValues(QPoint(x, y), 0);
+        if (pixelValues.isEmpty())
+          continue;
+
+        // Format the values with their labels
+        QStringList lines;
+        for (const auto &pair : pixelValues)
+        {
+          lines.append(pair.first + pair.second);
+        }
+
+        // Determine text color based on first value (assume luma/R)
+        bool drawWhite = false;
+        if (!pixelValues.isEmpty())
+        {
+          QString firstValue = pixelValues.first().second;
+          // Parse the value (remove any +/- prefix)
+          int value = std::abs(firstValue.toInt());
+          drawWhite = value < 128;
+        }
+        painter->setPen(drawWhite ? Qt::white : Qt::black);
+
+        QString text = lines.join("\n");
+        painter->drawText(pixelRect, Qt::AlignCenter, text);
+      }
+    }
+  }
+  else
+  {
+    // Fallback: use 16-bit RGB buffer (may not have correct YUV values)
+    const uint16_t *data = m_currentFrame.getData16bit();
+    if (!data)
+      return;
+
+    QSettings settings;
+    const bool showHex = settings.value("ShowPixelValuesHex", false).toBool();
+    const int maxVal = (1 << m_bitDepth) - 1;
+
+    for (int y = yMin; y <= yMax; ++y)
+    {
+      for (int x = xMin; x <= xMax; ++x)
+      {
+        // Calculate pixel rect in widget coordinates
+        double pxLeft = videoLeft + x * m_zoom;
+        double pxTop = videoTop + y * m_zoom;
+        QRect pixelRect(static_cast<int>(pxLeft), static_cast<int>(pxTop),
+                        static_cast<int>(m_zoom), static_cast<int>(m_zoom));
+
+        // Get pixel value from 16-bit buffer (RGBA)
+        int idx = (y * frameW + x) * 4;
+        uint16_t r = data[idx];
+        uint16_t g = data[idx + 1];
+        uint16_t b = data[idx + 2];
+
+        // Convert to display value based on bit depth
+        int rv = (r * maxVal) / 65535;
+        int gv = (g * maxVal) / 65535;
+        int bv = (b * maxVal) / 65535;
+
+        // Determine text color based on pixel brightness
+        bool isDark = (rv + gv + bv) / 3 < (maxVal / 2);
+        painter->setPen(isDark ? Qt::white : Qt::black);
+
+        // Format text with R/G/B labels
+        QString text;
+        if (showHex)
+          text = QString("R%1\nG%2\nB%3").arg(rv, 0, 16).arg(gv, 0, 16).arg(bv, 0, 16);
+        else
+          text = QString("R%1\nG%2\nB%3").arg(rv).arg(gv).arg(bv);
+
+        painter->drawText(pixelRect, Qt::AlignCenter, text);
+      }
+    }
+  }
+}
+
+// PixelOverlay implementation
+HDR10Widget::PixelOverlay::PixelOverlay(HDR10Widget *parent)
+  : QWidget(parent), hdrWidget(parent)
+{
+  setAttribute(Qt::WA_TransparentForMouseEvents);
+  setAttribute(Qt::WA_TransparentForMouseEvents);
+}
+
+void HDR10Widget::PixelOverlay::paintEvent(QPaintEvent *)
+{
+  if (!hdrWidget || !hdrWidget->m_showRawData)
+    return;
+
+  QPainter painter(this);
+  painter.setRenderHint(QPainter::Antialiasing, false);
+
+  hdrWidget->drawPixelValues(&painter);
 }
 
 } // namespace video
