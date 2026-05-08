@@ -70,6 +70,8 @@ protected:
   void paintGL() override;
   void updatePixelOverlay();
   void drawPixelValues(QPainter *painter);
+  void drawZoomIndicator(QPainter *painter);
+  void drawPixelRulers(QPainter *painter);
 
 private:
   void initShaders();

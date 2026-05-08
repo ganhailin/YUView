@@ -381,16 +381,21 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
           lines.append(pair.first + pair.second);
         }
 
-        // Determine text color based on first value (assume luma/R)
-        bool drawWhite = false;
-        if (!pixelValues.isEmpty())
-        {
-          QString firstValue = pixelValues.first().second;
-          // Parse the value (remove any +/- prefix)
-          int value = std::abs(firstValue.toInt());
-          drawWhite = value < 128;
-        }
-        painter->setPen(drawWhite ? Qt::white : Qt::black);
+        // Determine text color based on actual RGB color of the pixel
+        // Get RGB from the 16-bit buffer (this is what's actually displayed)
+        int idx = (y * frameW + x) * 4;
+        int r = m_currentFrame.getData16bit()[idx];
+        int g = m_currentFrame.getData16bit()[idx + 1];
+        int b = m_currentFrame.getData16bit()[idx + 2];
+
+        // Convert to display range based on bit depth
+        const int maxVal = (1 << 16) - 1;
+
+        // Calculate perceived brightness using weighted RGB to Y conversion
+        // Y = 0.299*R + 0.587*G + 0.114*B (ITU-R BT.601)
+        int brightness = static_cast<int>(0.299 * r + 0.587 * g + 0.114 * b);
+        bool isDark = brightness < (maxVal / 2);
+        painter->setPen(isDark ? Qt::white : Qt::black);
 
         QString text = lines.join("\n");
         painter->drawText(pixelRect, Qt::AlignCenter, text);
@@ -429,8 +434,10 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
         int gv = (g * maxVal) / 65535;
         int bv = (b * maxVal) / 65535;
 
-        // Determine text color based on pixel brightness
-        bool isDark = (rv + gv + bv) / 3 < (maxVal / 2);
+        // Determine text color based on perceived brightness
+        // Y = 0.299*R + 0.587*G + 0.114*B (ITU-R BT.601)
+        int brightness = static_cast<int>(0.299 * rv + 0.587 * gv + 0.114 * bv);
+        bool isDark = brightness < (maxVal / 2);
         painter->setPen(isDark ? Qt::white : Qt::black);
 
         // Format text with R/G/B labels
@@ -446,23 +453,133 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
   }
 }
 
+void HDR10Widget::drawZoomIndicator(QPainter *painter)
+{
+  if (m_zoom == 1.0)
+    return;
+
+  // Format zoom string (same as SplitViewWidget)
+  QString zoomString = QString("x") + QString::number(m_zoom, 'g', (m_zoom < 0.5) ? 4 : 2);
+
+  // Set up font
+  QFont font("helvetica", 24);
+  painter->setRenderHint(QPainter::TextAntialiasing);
+  painter->setPen(QColor(Qt::black));
+  painter->setFont(font);
+
+  // Draw at top-left corner
+  QPoint pos(10, QFontMetrics(font).height());
+  painter->drawText(pos, zoomString);
+}
+
+void HDR10Widget::drawPixelRulers(QPainter *painter)
+{
+  if (!m_frameHandler || m_zoom < 32.0)
+    return;
+
+  if (!m_currentFrame.isValid() || m_frameSize.isEmpty())
+    return;
+
+  // Set up font for ruler values
+  QFont valueFont("helvetica", 10);
+  painter->setFont(valueFont);
+
+  int widgetW = width();
+  int widgetH = height();
+  int frameW = m_frameSize.width();
+  int frameH = m_frameSize.height();
+
+  // Calculate video rect position (same as paintGL logic)
+  double displayW = frameW * m_zoom;
+  double displayH = frameH * m_zoom;
+  double videoLeft = widgetW * 0.5 + m_moveOffset.x() - displayW * 0.5;
+  double videoTop = widgetH * 0.5 + m_moveOffset.y() - displayH * 0.5;
+
+  // Calculate visible pixel range for X (horizontal ruler on top)
+  int xMin = static_cast<int>(std::max(0.0, -videoLeft / m_zoom));
+  int xMax = static_cast<int>(std::min(static_cast<double>(frameW - 1), (widgetW - videoLeft) / m_zoom));
+
+  // Draw X pixel indicators (horizontal ruler on top edge)
+  for (int x = xMin; x <= xMax; ++x)
+  {
+    int xPosOnScreen = static_cast<int>(videoLeft + x * m_zoom);
+
+    // Draw tick marks
+    painter->setPen(QPen(Qt::white));
+    painter->drawLine(xPosOnScreen, 0, xPosOnScreen, 5);
+    painter->setPen(QPen(Qt::black));
+    painter->drawLine(xPosOnScreen + 1, 0, xPosOnScreen + 1, 5);
+
+    // Draw values (every 5th value, or all values for zoom >= 128)
+    if ((m_zoom >= 128 || x % 5 == 0) && x != frameW)
+    {
+      QString numberText = QString::number(x);
+      QFontMetrics metrics(valueFont);
+      QSize rectSize = metrics.size(0, numberText) + QSize(4, 0);
+      QPoint rectPosTopLeft(xPosOnScreen + static_cast<int>(m_zoom / 2) - rectSize.width() / 2, 2);
+      QRect textRect(rectPosTopLeft, rectSize);
+
+      // Draw white background rect and text
+      painter->fillRect(textRect, Qt::white);
+      painter->setPen(QPen(Qt::black));
+      painter->drawText(textRect, Qt::AlignCenter, numberText);
+    }
+  }
+
+  // Calculate visible pixel range for Y (vertical ruler on left)
+  int yMin = static_cast<int>(std::max(0.0, -videoTop / m_zoom));
+  int yMax = static_cast<int>(std::min(static_cast<double>(frameH - 1), (widgetH - videoTop) / m_zoom));
+
+  // Draw Y pixel indicators (vertical ruler on left edge)
+  for (int y = yMin; y <= yMax; ++y)
+  {
+    int yPosOnScreen = static_cast<int>(videoTop + y * m_zoom);
+
+    // Draw tick marks
+    painter->setPen(QPen(Qt::white));
+    painter->drawLine(0, yPosOnScreen, 5, yPosOnScreen);
+    painter->setPen(QPen(Qt::black));
+    painter->drawLine(0, yPosOnScreen + 1, 5, yPosOnScreen + 1);
+
+    // Draw values (every 5th value, or all values for zoom >= 128)
+    if ((m_zoom >= 128 || y % 5 == 0) && y != frameH)
+    {
+      QString numberText = QString::number(y);
+      QFontMetrics metrics(valueFont);
+      QSize rectSize = metrics.size(0, numberText) + QSize(4, 0);
+      QPoint rectPosTopLeft(2, yPosOnScreen + static_cast<int>(m_zoom / 2) - rectSize.height() / 2);
+      QRect textRect(rectPosTopLeft, rectSize);
+
+      // Draw white background rect and text
+      painter->fillRect(textRect, Qt::white);
+      painter->setPen(QPen(Qt::black));
+      painter->drawText(textRect, Qt::AlignCenter, numberText);
+    }
+  }
+}
+
 // PixelOverlay implementation
 HDR10Widget::PixelOverlay::PixelOverlay(HDR10Widget *parent)
   : QWidget(parent), hdrWidget(parent)
 {
   setAttribute(Qt::WA_TransparentForMouseEvents);
-  setAttribute(Qt::WA_TransparentForMouseEvents);
 }
 
 void HDR10Widget::PixelOverlay::paintEvent(QPaintEvent *)
 {
-  if (!hdrWidget || !hdrWidget->m_showRawData)
+  if (!hdrWidget)
     return;
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, false);
 
-  hdrWidget->drawPixelValues(&painter);
+  // Draw pixel values if enabled
+  if (hdrWidget->m_showRawData)
+    hdrWidget->drawPixelValues(&painter);
+
+  // Draw zoom factor and pixel rulers (always draw if zoom != 1.0)
+  hdrWidget->drawZoomIndicator(&painter);
+  hdrWidget->drawPixelRulers(&painter);
 }
 
 } // namespace video
