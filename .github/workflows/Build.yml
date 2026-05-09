@@ -47,7 +47,7 @@ jobs:
         cd build/YUViewApp
         # Zip
         xattr -cr YUView.app
-        codesign --force --deep --sign - YUView.app
+        # codesign --force --deep --sign - YUView.app
         ditto -c -k --sequesterRsrc --keepParent YUView.app ${{steps.artifacts.outputs.outputZip}}
         mkdir $GITHUB_WORKSPACE/artifacts
         cp ${{steps.artifacts.outputs.outputZip}} $GITHUB_WORKSPACE/artifacts/
