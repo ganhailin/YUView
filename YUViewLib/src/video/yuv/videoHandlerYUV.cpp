@@ -2888,6 +2888,305 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
   DEBUG_YUV("videoHandlerYUV::convertYUVToImage Done");
 }
 
+// Convert YUV data to 16-bit RGBA buffer for HDR rendering
+// This function converts YUV (8-16 bits per sample) to a standard 16-bit RGBA output.
+// For input bit depth < 16, values are left-shifted to fill the 16-bit range.
+// Supports YUV 4:2:0, 4:2:2, 4:4:4, and 4:0:0 (monochrome) with planar and semi-planar formats.
+template <int bitDepth>
+void convertYUVTo16BitRGBAInternal(const QByteArray         &sourceBuffer,
+                                   uint16_t                 *targetBuffer,
+                                   const Size                curFrameSize,
+                                   const PixelFormatYUV     &yuvFormat,
+                                   const ConversionSettings &conversionSettings)
+{
+  const auto format        = yuvFormat;
+  const auto interpolation = conversionSettings.chromaInterpolation;
+  const auto conversion    = conversionSettings.colorConversion;
+  // Note: component display mode not used for 16-bit conversion (always DisplayAll)
+  const auto w             = curFrameSize.width;
+  const auto h             = curFrameSize.height;
+
+  // Verify buffer size is sufficient
+  const auto expectedBytes = yuvFormat.bytesPerFrame(curFrameSize, 0);
+  if (sourceBuffer.size() < expectedBytes)
+  {
+    DEBUG_YUV("convertYUVTo16BitRGBAInternal: Buffer too small. Expected " << expectedBytes
+                                                                              << " bytes, got "
+                                                                              << sourceBuffer.size());
+    return;
+  }
+
+  // YUV math parameters
+  const auto mathY = conversionSettings.mathParameters.at(Component::Luma);
+  const auto mathC = conversionSettings.mathParameters.at(Component::Chroma);
+
+  const bool fullRange = isFullRange(conversionSettings.colorConversion);
+  const auto inputMax  = (1 << bitDepth) - 1;
+  const auto shiftTo16 = 16 - bitDepth;
+
+  // Get color conversion coefficients
+  int RGBConv[5];
+  getColorConversionCoefficients(conversion, RGBConv);
+
+  // Component sizes
+  const auto componentSizeLuma   = (w * h);
+  const auto componentSizeChroma = (w / format.getSubsamplingHor()) * (h / format.getSubsamplingVer());
+  const auto nrBytesLumaPlane    = (bitDepth > 8) ? componentSizeLuma * 2 : componentSizeLuma;
+  const auto nrBytesChromaPlane  = (bitDepth > 8) ? componentSizeChroma * 2 : componentSizeChroma;
+
+  const auto inputValSkip = format.isUVInterleaved()
+                                ? ((format.getPlaneOrder() == PlaneOrder::YUV ||
+                                    format.getPlaneOrder() == PlaneOrder::YVU)
+                                       ? 2
+                                       : 3)
+                                : 1;
+
+  // Always use byte pointers for arithmetic to avoid confusion
+  // Then cast to appropriate type for reading
+  const auto rawData8 = sourceBuffer.data();
+
+  // Get plane offsets (in bytes)
+  const auto uPlaneFirst =
+      (format.getPlaneOrder() == PlaneOrder::YUV || format.getPlaneOrder() == PlaneOrder::YUVA);
+
+  const auto offsetY = 0;
+  const auto offsetU = uPlaneFirst ? nrBytesLumaPlane
+                                   : nrBytesLumaPlane +
+                                          (format.isUVInterleaved() ? (bitDepth > 8 ? 2 : 1) : nrBytesChromaPlane);
+  const auto offsetV = uPlaneFirst ? nrBytesLumaPlane +
+                                          (format.isUVInterleaved() ? (bitDepth > 8 ? 2 : 1) : nrBytesChromaPlane)
+                                   : nrBytesLumaPlane;
+
+  // Cast to appropriate pointer type based on bit depth
+  using InValueType =
+      typename std::conditional_t<bitDepth == 8, const uint8_t *, const uint16_t *>;
+
+  InValueType srcY = reinterpret_cast<InValueType>(rawData8 + offsetY);
+  InValueType srcU = reinterpret_cast<InValueType>(rawData8 + offsetU);
+  InValueType srcV = reinterpret_cast<InValueType>(rawData8 + offsetV);
+
+  const auto chromaSubH = format.getSubsamplingHor();
+  const auto chromaSubV = format.getSubsamplingVer();
+
+  // Helper to read raw value (without extension)
+  auto readRaw = [](InValueType ptr, bool bigEndian = false) -> int {
+    if constexpr (bitDepth == 8)
+    {
+      return static_cast<uint8_t>(*ptr);
+    }
+    else
+    {
+      uint16_t val = *ptr;
+      if (bigEndian)
+        val = ((val & 0xFF) << 8) | ((val >> 8) & 0xFF);
+      return val;
+    }
+  };
+
+  // Helper to extend value to 16-bit after math operations
+  auto extendTo16 = [shiftTo16](int val) -> uint16_t {
+    return static_cast<uint16_t>(val << shiftTo16);
+  };
+
+  // Process each pixel
+  for (unsigned y = 0; y < h; y++)
+  {
+    for (unsigned x = 0; x < w; x++)
+    {
+      // Get luma raw value, apply math, then extend to 16-bit
+      int Y_raw = readRaw(srcY + y * w + x, format.isBigEndian());
+
+      // Apply luma math (on original bit depth)
+      if (mathY.scale != 1 || mathY.offset != 0)
+      {
+        if (mathY.invert)
+          Y_raw = -(Y_raw - mathY.offset) * mathY.scale + mathY.offset;
+        else
+          Y_raw = (Y_raw - mathY.offset) * mathY.scale + mathY.offset;
+        Y_raw = functions::clip(Y_raw, 0, inputMax);
+      }
+
+      // Extend to 16-bit after math
+      uint16_t Y = extendTo16(Y_raw);
+
+      // Get chroma values (with subsampling)
+      uint16_t U = 32768; // 0.5 in 16-bit (neutral)
+      uint16_t V = 32768;
+
+      if (format.getSubsampling() != Subsampling::YUV_400)
+      {
+        unsigned chromaX = x / chromaSubH;
+        unsigned chromaY = y / chromaSubV;
+        unsigned chromaIdx = chromaY * (w / chromaSubH) + chromaX;
+
+        // Handle chroma interpolation
+        if (interpolation == ChromaInterpolation::NearestNeighbor ||
+            (chromaSubH == 1 && chromaSubV == 1))
+        {
+          // Nearest neighbor or no subsampling
+          int U_raw = readRaw(srcU + chromaIdx * inputValSkip, format.isBigEndian());
+          int V_raw = readRaw(srcV + chromaIdx * inputValSkip, format.isBigEndian());
+
+          // Apply chroma math (on original bit depth)
+          if (mathC.scale != 1 || mathC.offset != 0)
+          {
+            if (mathC.invert) {
+              U_raw = -(U_raw - mathC.offset) * mathC.scale + mathC.offset;
+              V_raw = -(V_raw - mathC.offset) * mathC.scale + mathC.offset;
+            } else {
+              U_raw = (U_raw - mathC.offset) * mathC.scale + mathC.offset;
+              V_raw = (V_raw - mathC.offset) * mathC.scale + mathC.offset;
+            }
+            U_raw = functions::clip(U_raw, 0, inputMax);
+            V_raw = functions::clip(V_raw, 0, inputMax);
+          }
+
+          // Extend to 16-bit after math
+          U = extendTo16(U_raw);
+          V = extendTo16(V_raw);
+        }
+        else
+        {
+          // For simplicity, use nearest neighbor for now
+          // TODO: Implement proper interpolation (bilinear, etc.)
+          int U_raw = readRaw(srcU + chromaIdx * inputValSkip, format.isBigEndian());
+          int V_raw = readRaw(srcV + chromaIdx * inputValSkip, format.isBigEndian());
+
+          // Apply chroma math (on original bit depth)
+          if (mathC.scale != 1 || mathC.offset != 0)
+          {
+            if (mathC.invert) {
+              U_raw = -(U_raw - mathC.offset) * mathC.scale + mathC.offset;
+              V_raw = -(V_raw - mathC.offset) * mathC.scale + mathC.offset;
+            } else {
+              U_raw = (U_raw - mathC.offset) * mathC.scale + mathC.offset;
+              V_raw = (V_raw - mathC.offset) * mathC.scale + mathC.offset;
+            }
+            U_raw = functions::clip(U_raw, 0, inputMax);
+            V_raw = functions::clip(V_raw, 0, inputMax);
+          }
+
+          // Extend to 16-bit after math
+          U = extendTo16(U_raw);
+          V = extendTo16(V_raw);
+        }
+      }
+
+      // Convert YUV to RGB using color conversion coefficients
+      // RGBConv: [cRY, cGY, cBY, cRUV, cBUV] where cGUV = -cRUV - cBUV
+      // C = Y - 16 (or 0 for full range), D = U - 128, E = V - 128
+      // R = clip((C * cRY + D * cRUV) >> 8)
+      // G = clip((C * cGY - D * cRUV - E * cBUV) >> 8)  [simplified]
+      // B = clip((C * cBY + E * cBUV) >> 8)
+
+      int Yc, Uc, Vc;
+      if (fullRange)
+      {
+        Yc = Y; // 0.5 offset in 16-bit
+        Uc = U - 32768;          // 128 << 8
+        Vc = V - 32768;
+      }
+      else
+      {
+        // Limited range: Y in [16, 235], UV in [16, 240]
+        Yc = Y - (16 << 8);
+        Uc = U - (128 << 8);
+        Vc = V - (128 << 8);
+      }
+
+      // Apply coefficients (RGBConv values are scaled by 256)
+      int64_t R = ((int64_t)Yc * RGBConv[0] + (int64_t)Vc * RGBConv[1]) /65536;
+      int64_t G = ((int64_t)Yc * RGBConv[0] + (int64_t)Uc * RGBConv[2] + (int64_t)Vc * RGBConv[3]) /65536;
+      int64_t B = ((int64_t)Yc * RGBConv[0] + (int64_t)Uc * RGBConv[4]) /65536;
+
+      // Clip to 16-bit range
+      R = functions::clip(R, 0, 65535);
+      G = functions::clip(G, 0, 65535);
+      B = functions::clip(B, 0, 65535);
+
+      // Write to target buffer (RGBA)
+      unsigned idx = (y * w + x) * 4;
+      targetBuffer[idx + 0] = static_cast<uint16_t>(R);
+      targetBuffer[idx + 1] = static_cast<uint16_t>(G);
+      targetBuffer[idx + 2] = static_cast<uint16_t>(B);
+      targetBuffer[idx + 3] = 65535; // Alpha
+    }
+  }
+}
+
+// Convert YUV data to 16-bit RGBA buffer for HDR rendering
+void convertYUVTo16BitRGBA(const QByteArray         &sourceBuffer,
+                           uint16_t                 *targetBuffer,
+                           const Size                frameSize,
+                           const PixelFormatYUV     &yuvFormat,
+                           const ConversionSettings &conversionSettings)
+{
+  if (!yuvFormat.canConvertToRGB(frameSize) || sourceBuffer.isEmpty())
+    return;
+
+  const auto bps = yuvFormat.getBitsPerSample();
+
+  // For packed formats, convert to planar first
+  if (!yuvFormat.isPlanar())
+  {
+    QByteArray tmpPlanarYUVSource;
+    QByteArray copyBuffer;  // Required for NV15/20/30 conversion
+    PixelFormatYUV newPixelFormat;
+    bool convOK = false;
+
+    if (auto predefinedFormat = yuvFormat.getPredefinedFormat())
+    {
+      if (*predefinedFormat == PredefinedPixelFormat::V210)
+        std::tie(convOK, newPixelFormat) =
+            convertV210PackedToPlanar(sourceBuffer, tmpPlanarYUVSource, frameSize);
+      else if (*predefinedFormat == PredefinedPixelFormat::NV15)
+        std::tie(convOK, newPixelFormat) = convertNV15PackedToPlanar(
+          sourceBuffer, tmpPlanarYUVSource, frameSize, conversionSettings, copyBuffer);
+      else if (*predefinedFormat == PredefinedPixelFormat::NV20)
+        std::tie(convOK, newPixelFormat) = convertNV20PackedToPlanar(
+          sourceBuffer, tmpPlanarYUVSource, frameSize, conversionSettings, copyBuffer);
+      else if (*predefinedFormat == PredefinedPixelFormat::NV30)
+        std::tie(convOK, newPixelFormat) = convertNV30PackedToPlanar(
+          sourceBuffer, tmpPlanarYUVSource, frameSize, conversionSettings, copyBuffer);
+      else
+        convOK = false;
+    }
+    else
+      std::tie(convOK, newPixelFormat) =
+          convertYUVPackedToPlanar(sourceBuffer, tmpPlanarYUVSource, frameSize, yuvFormat);
+
+    if (!convOK)
+    {
+      DEBUG_YUV("convertYUVTo16BitRGBA: Failed to convert packed format to planar");
+      return;
+    }
+
+    // Verify the planar buffer size matches expected size for the new format
+    const auto expectedPlanarBytes = newPixelFormat.bytesPerFrame(frameSize, 0);
+    if (tmpPlanarYUVSource.size() < expectedPlanarBytes)
+    {
+      DEBUG_YUV("convertYUVTo16BitRGBA: Planar buffer too small. Expected " << expectedPlanarBytes
+                                                                                << " bytes, got "
+                                                                                << tmpPlanarYUVSource.size());
+      return;
+    }
+
+    // Recurse with planar format
+    convertYUVTo16BitRGBA(tmpPlanarYUVSource, targetBuffer, frameSize, newPixelFormat, conversionSettings);
+    return;
+  }
+
+  // Call template function based on bit depth
+  if (bps == 8)
+    convertYUVTo16BitRGBAInternal<8>(sourceBuffer, targetBuffer, frameSize, yuvFormat, conversionSettings);
+  else if (bps <= 10)
+    convertYUVTo16BitRGBAInternal<10>(sourceBuffer, targetBuffer, frameSize, yuvFormat, conversionSettings);
+  else if (bps <= 12)
+    convertYUVTo16BitRGBAInternal<12>(sourceBuffer, targetBuffer, frameSize, yuvFormat, conversionSettings);
+  else if (bps <= 16)
+    convertYUVTo16BitRGBAInternal<16>(sourceBuffer, targetBuffer, frameSize, yuvFormat, conversionSettings);
+}
+
 } // namespace
 
 std::vector<PixelFormatYUV> videoHandlerYUV::formatPresetList = {
@@ -3783,6 +4082,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
                       this->copyData);
     doubleBufferImage           = newImage;
     doubleBufferImageFrameIndex = frameIndex;
+    // Note: We don't set doubleBufferVideoFrame here as it doesn't exist.
+    // Double buffering is for caching, HDR rendering uses current frame.
   }
   else if (currentImageIndex != frameIndex)
   {
@@ -3802,6 +4103,28 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     QMutexLocker setLock(&currentImageSetMutex);
     currentImage      = newImage;
     currentImageIndex = frameIndex;
+
+    // For high bit-depth sources (>8 bits), also generate a real 16-bit buffer for HDR rendering
+    // This provides true high-bit-depth data to HDR10Widget instead of 8-bit expanded data
+    if (this->srcPixelFormat.getBitsPerSample() > 8)
+    {
+      const auto numPixels = frameSize.width * frameSize.height;
+      QVector<uint16_t> buffer16bit(numPixels * 4); // RGBA
+      convertYUVTo16BitRGBA(currentFrameRawData,
+                            buffer16bit.data(),
+                            frameSize,
+                            srcPixelFormat,
+                            conversionSettings);
+      currentVideoFrame.set16bitBuffer(std::move(buffer16bit),
+                                       static_cast<int>(frameSize.width),
+                                       static_cast<int>(frameSize.height));
+    }
+    else
+    {
+      // For 8-bit sources, clear any existing 16-bit buffer to save memory
+      // HDR10Widget will call generate16bitBuffer() if needed (8-bit compatibility)
+      currentVideoFrame.clear();
+    }
   }
 }
 
