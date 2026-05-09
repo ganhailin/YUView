@@ -189,6 +189,9 @@ public:
 
   bool isDiffReady() const { return this->diffReady; }
 
+
+  // Get the current YUV pixel format
+  PixelFormatYUV getSrcPixelFormat() const { return this->srcPixelFormat; }
   virtual void savePlaylist(YUViewDomElement &root) const override;
   virtual void loadPlaylist(const YUViewDomElement &root) override;
 

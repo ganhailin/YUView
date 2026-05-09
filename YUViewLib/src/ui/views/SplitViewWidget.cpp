@@ -1521,7 +1521,16 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
   Q_ASSERT_X(this->isMasterView, Q_FUNC_INFO, "Call this function only on the primary widget.");
 
   if (!item1 && !item2)
+  {
+    // Hide HDR10Widget when no items are selected
+    if (hdr10Widget)
+      hdr10Widget->hide();
     return;
+  }
+
+  // Show HDR10Widget if HDR rendering is enabled (paintEvent will handle the rest)
+  if (hdr10Widget && hdrRenderingMode == HDRRenderingMode::Enabled)
+    hdr10Widget->show();
 
   QSettings settings;
   bool savePositionAndZoomPerItem = settings.value("SavePositionAndZoomPerItem", false).toBool();

@@ -32,6 +32,7 @@
 #include "HDR10Widget.h"
 
 #include <video/FrameHandler.h>
+#include <video/yuv/videoHandlerYUV.h>
 
 #include <QDebug>
 #include <QSurfaceFormat>
@@ -83,28 +84,39 @@ HDR10Widget::~HDR10Widget()
 
 void HDR10Widget::setFrame(const VideoFrame &frame)
 {
-  m_currentFrame     = frame;
-  m_frameSize        = frame.getSize();
-  m_frameNeedsUpdate = true;
-  update();
+  // Only update if frame data actually changed
+  // Compare 16-bit buffer pointers to detect if it's the same frame data
+  const uint16_t *newData = frame.getData16bit();
+  const uint16_t *oldData = m_currentFrame.getData16bit();
+
+  if (newData != oldData || frame.getSize() != m_frameSize)
+  {
+    m_currentFrame     = frame;
+    m_frameSize        = frame.getSize();
+    m_frameNeedsUpdate = true;
+    update();
+  }
 }
 
 void HDR10Widget::setDithering(bool enable)
 {
   m_ditheringEnabled = enable;
+  updatePixelOverlay();
   update();
 }
 
 void HDR10Widget::setZoom(double zoom)
 {
   m_zoom = zoom;
-  updatePixelOverlay();
+  update();             // Trigger OpenGL re-render (vertices changed)
+  updatePixelOverlay(); // Update QPainter overlay
 }
 
 void HDR10Widget::setMoveOffset(QPointF offset)
 {
   m_moveOffset = offset;
-  updatePixelOverlay();
+  update();             // Trigger OpenGL re-render (vertices changed)
+  updatePixelOverlay(); // Update QPainter overlay
 }
 
 void HDR10Widget::updatePixelOverlay()
@@ -115,7 +127,6 @@ void HDR10Widget::updatePixelOverlay()
 
 void HDR10Widget::initializeGL()
 {
-  qDebug() << "HDR10Widget::initializeGL() called";
   initializeOpenGLFunctions();
 
   const char *version  = reinterpret_cast<const char *>(glGetString(GL_VERSION));
@@ -142,7 +153,9 @@ void HDR10Widget::initializeGL()
 
   initShaders();
   initGeometry();
-  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  QSettings settings;
+  QColor backgroundColor = settings.value("View/BackgroundColor", QColor(140, 140, 140)).value<QColor>();
+  glClearColor(backgroundColor.redF(), backgroundColor.greenF(), backgroundColor.blueF(), 1.0f);
 
   m_initialized = true;
 }
@@ -208,14 +221,9 @@ void HDR10Widget::updateTexture()
   if (!m_currentFrame.isValid())
     return;
 
-  if (m_textureId != 0)
-  {
-    glDeleteTextures(1, &m_textureId);
-    m_textureId = 0;
-  }
-
   const int w = m_currentFrame.width();
   const int h = m_currentFrame.height();
+  const QSize newSize(w, h);
 
   // Check if VideoFrame already has a 16-bit buffer (from high bit-depth source like 10/12/16-bit RGB)
   // If not, generate it from the 8-bit QImage (for 8-bit sources, maintains backward compatibility)
@@ -245,16 +253,36 @@ void HDR10Widget::updateTexture()
   // - Dithering shader: dithers to m_bitDepth levels
   // Data is always uploaded as 16-bit, so shader divides by 65535.0 first
 
-  glGenTextures(1, &m_textureId);
-  glBindTexture(GL_TEXTURE_2D, m_textureId);
+  const bool sizeChanged = (m_textureSize != newSize);
 
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16UI, w, h, 0, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, data);
+  if (m_textureId == 0 || sizeChanged)
+  {
+    // Create new texture (first time or size changed)
+    if (m_textureId != 0)
+    {
+      glDeleteTextures(1, &m_textureId);
+    }
 
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenTextures(1, &m_textureId);
+    glBindTexture(GL_TEXTURE_2D, m_textureId);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16UI, w, h, 0, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, data);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    m_textureSize = newSize;
+  }
+  else
+  {
+    // Reuse existing texture - just update the data
+    glBindTexture(GL_TEXTURE_2D, m_textureId);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, data);
+  }
 
   glBindTexture(GL_TEXTURE_2D, 0);
   m_frameNeedsUpdate = false;
@@ -262,7 +290,6 @@ void HDR10Widget::updateTexture()
 
 void HDR10Widget::resizeGL(int w, int h)
 {
-  qDebug() << "HDR10Widget::resizeGL() called:" << w << "x" << h;
   glViewport(0, 0, w, h);
 
   // Update pixel overlay geometry to match
@@ -272,10 +299,7 @@ void HDR10Widget::resizeGL(int w, int h)
 
 void HDR10Widget::paintGL()
 {
-  qDebug() << "HDR10Widget::paintGL() called, size:" << width() << "x" << height() << "frame:" << m_frameSize.width() << "x" << m_frameSize.height();
-
   // Bind the correct framebuffer (QOpenGLWidget uses an internal FBO)
-  // Use defaultFramebufferObject() instead of bindDefault()
   glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
 
   // Disable depth testing for 2D rendering
@@ -286,24 +310,21 @@ void HDR10Widget::paintGL()
   // Set viewport to full widget size
   glViewport(0, 0, width() * devicePixelRatio(), height() * devicePixelRatio());
 
-  // Clear to red to debug
-  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+  // Clear to the same background color as SplitViewWidget
+  QSettings settings;
+  QColor backgroundColor = settings.value("View/BackgroundColor", QColor(140, 140, 140)).value<QColor>();
+  glClearColor(backgroundColor.redF(), backgroundColor.greenF(), backgroundColor.blueF(), 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
   if (!m_program || !m_programDither)
-  {
-    qDebug() << "HDR10Widget::paintGL() - shaders not initialized";
     return;
-  }
 
   if (m_frameNeedsUpdate)
     updateTexture();
 
   if (m_textureId == 0)
   {
-    // No frame to render, but we still need to flush the clear
     glFinish();
-    qDebug() << "HDR10Widget::paintGL() - no frame, cleared only";
     return;
   }
 
@@ -373,18 +394,11 @@ void HDR10Widget::paintGL()
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-  // Check for OpenGL errors
-  GLenum error = glGetError();
-  if (error != GL_NO_ERROR)
-    qDebug() << "HDR10Widget::paintGL() - OpenGL error:" << error;
-
   m_vao.release();
   currentProgram->release();
 
-  // Ensure rendering completes and is visible
+  // Ensure rendering completes
   glFinish();
-
-  qDebug() << "HDR10Widget::paintGL() - drawing complete";
 }
 
 void HDR10Widget::drawPixelValues(QPainter *painter)
@@ -423,17 +437,56 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
   font.setPointSize(10);
   painter->setFont(font);
 
+  // Cache common values
+  const uint16_t *frameData = m_currentFrame.getData16bit();
+  if (!frameData)
+    return;
+
+  QSettings settings;
+  const bool showHex = settings.value("ShowPixelValuesHex", false).toBool();
+  const int maxDisplayVal = (1 << m_sourceBitDepth) - 1;
+  const int maxVal16 = 65535;
+  const int halfMax16 = maxVal16 / 2;
+
   // Draw pixel values using FrameHandler if available, otherwise fallback to RGB buffer
   if (m_frameHandler)
   {
+    // Check if this is a YUV source and get subsampling info
+    auto *yuvHandler = dynamic_cast<video::yuv::videoHandlerYUV *>(m_frameHandler);
+    const bool isYUV = (yuvHandler != nullptr);
+
+    // Get YUV format info if available
+    int subsamplingX = 1;
+    int subsamplingY = 1;
+    int chromaOffsetFullX = 0;
+    int chromaOffsetFullY = 0;
+    bool chromaPresent = false;
+
+    if (isYUV)
+    {
+      auto format = yuvHandler->getSrcPixelFormat();
+      subsamplingX = format.getSubsamplingHor();
+      subsamplingY = format.getSubsamplingVer();
+      // The chroma offset in full luma pixels. This can range from 0 to 3.
+      chromaOffsetFullX = format.getChromaOffset().x / 2;
+      chromaOffsetFullY = format.getChromaOffset().y / 2;
+      chromaPresent = (format.getSubsampling() != video::yuv::Subsampling::YUV_400);
+    }
+
+    // Pre-calculate row strides
+    const int rowStride = frameW * 4;
+
     // Use FrameHandler to get properly labeled pixel values (YUV or RGB)
     for (int y = yMin; y <= yMax; ++y)
     {
+      // Pre-calculate Y position
+      double pxTop = videoTop + y * m_zoom;
+      int baseIdx = y * rowStride;
+
       for (int x = xMin; x <= xMax; ++x)
       {
         // Calculate pixel rect in widget coordinates
         double pxLeft = videoLeft + x * m_zoom;
-        double pxTop = videoTop + y * m_zoom;
         QRect pixelRect(static_cast<int>(pxLeft), static_cast<int>(pxTop),
                         static_cast<int>(m_zoom), static_cast<int>(m_zoom));
 
@@ -443,27 +496,37 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
           continue;
 
         // Format the values with their labels
+        // For YUV sources, only show UV values on pixels where chroma is sampled
         QStringList lines;
         for (const auto &pair : pixelValues)
         {
-          lines.append(pair.first + pair.second);
+          QString label = pair.first;
+          // For YUV sources, check if we should show U/V values based on subsampling
+          if (isYUV && chromaPresent && (label == "U" || label == "V"))
+          {
+            // Check if this pixel position should show chroma values
+            // (same logic as videoHandlerYUV::drawPixelValues)
+            if ((x - chromaOffsetFullX) % subsamplingX != 0 ||
+                (y - chromaOffsetFullY) % subsamplingY != 0)
+            {
+              // Skip UV values for this pixel (not a chroma sampling position)
+              continue;
+            }
+          }
+          lines.append(label + pair.second);
         }
 
         // Determine text color based on actual RGB color of the pixel
         // Get RGB from the 16-bit buffer (this is what's actually displayed)
-        int idx = (y * frameW + x) * 4;
-        int r = m_currentFrame.getData16bit()[idx];
-        int g = m_currentFrame.getData16bit()[idx + 1];
-        int b = m_currentFrame.getData16bit()[idx + 2];
-
-        // Convert to display range based on bit depth
-        const int maxVal = (1 << 16) - 1;
+        int idx = baseIdx + x * 4;
+        int r = frameData[idx];
+        int g = frameData[idx + 1];
+        int b = frameData[idx + 2];
 
         // Calculate perceived brightness using weighted RGB to Y conversion
         // Y = 0.299*R + 0.587*G + 0.114*B (ITU-R BT.601)
-        int brightness = static_cast<int>(0.299 * r + 0.587 * g + 0.114 * b);
-        bool isDark = brightness < (maxVal / 2);
-        painter->setPen(isDark ? Qt::white : Qt::black);
+        int brightness = (299 * r + 587 * g + 114 * b) / 1000;
+        painter->setPen(brightness < halfMax16 ? Qt::white : Qt::black);
 
         QString text = lines.join("\n");
         painter->drawText(pixelRect, Qt::AlignCenter, text);
@@ -473,43 +536,33 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
   else
   {
     // Fallback: use 16-bit RGB buffer (may not have correct YUV values)
-    const uint16_t *data = m_currentFrame.getData16bit();
-    if (!data)
-      return;
-
-    QSettings settings;
-    const bool showHex = settings.value("ShowPixelValuesHex", false).toBool();
-    // Use source bit depth for display (e.g., show 0-255 for 8-bit sources, 0-1023 for 10-bit)
-    const int maxDisplayVal = (1 << m_sourceBitDepth) - 1;
+    const int rowStride = frameW * 4;
 
     for (int y = yMin; y <= yMax; ++y)
     {
+      double pxTop = videoTop + y * m_zoom;
+      int baseIdx = y * rowStride;
+
       for (int x = xMin; x <= xMax; ++x)
       {
-        // Calculate pixel rect in widget coordinates
         double pxLeft = videoLeft + x * m_zoom;
-        double pxTop = videoTop + y * m_zoom;
         QRect pixelRect(static_cast<int>(pxLeft), static_cast<int>(pxTop),
                         static_cast<int>(m_zoom), static_cast<int>(m_zoom));
 
         // Get pixel value from 16-bit buffer (RGBA)
-        int idx = (y * frameW + x) * 4;
-        uint16_t r = data[idx];
-        uint16_t g = data[idx + 1];
-        uint16_t b = data[idx + 2];
+        int idx = baseIdx + x * 4;
+        uint16_t r = frameData[idx];
+        uint16_t g = frameData[idx + 1];
+        uint16_t b = frameData[idx + 2];
 
         // Convert from 16-bit storage range (0-65535) to source bit depth display range
-        // e.g., for 8-bit source: (r * 255) / 65535 gives 0-255
-        // e.g., for 10-bit source: (r * 1023) / 65535 gives 0-1023
-        int rv = (r * maxDisplayVal) / 65535;
-        int gv = (g * maxDisplayVal) / 65535;
-        int bv = (b * maxDisplayVal) / 65535;
+        int rv = (r * maxDisplayVal) / maxVal16;
+        int gv = (g * maxDisplayVal) / maxVal16;
+        int bv = (b * maxDisplayVal) / maxVal16;
 
         // Determine text color based on perceived brightness (using display values)
-        // Y = 0.299*R + 0.587*G + 0.114*B (ITU-R BT.601)
-        int brightness = static_cast<int>(0.299 * rv + 0.587 * gv + 0.114 * bv);
-        bool isDark = brightness < (maxDisplayVal / 2);
-        painter->setPen(isDark ? Qt::white : Qt::black);
+        int brightness = (299 * rv + 587 * gv + 114 * bv) / 1000;
+        painter->setPen(brightness < (maxDisplayVal / 2) ? Qt::white : Qt::black);
 
         // Format text with R/G/B labels
         QString text;
@@ -646,9 +699,10 @@ void HDR10Widget::PixelOverlay::paintEvent(QPaintEvent *)
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, false);
 
-  // Draw pixel values if enabled
-  if (hdrWidget->m_showRawData)
+  // Draw pixel values if enabled and zoom is high enough
+  if (hdrWidget->m_showRawData && hdrWidget->m_zoom >= 4.0){
     hdrWidget->drawPixelValues(&painter);
+  }
 
   // Draw zoom factor and pixel rulers (always draw if zoom != 1.0)
   hdrWidget->drawZoomIndicator(&painter);

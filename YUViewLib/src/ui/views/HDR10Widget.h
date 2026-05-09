@@ -60,7 +60,7 @@ public:
   void setDithering(bool enable);
   void setZoom(double zoom);
   void setMoveOffset(QPointF offset);
-  void setShowRawData(bool show) { m_showRawData = show; updatePixelOverlay(); }
+  void setShowRawData(bool show) { m_showRawData = show; update(); updatePixelOverlay(); }
   bool supports10bit() const { return m_supports10bit; }
   QString getOpenGLInfo() const { return m_openglInfo; }
 
@@ -95,6 +95,7 @@ private:
   QOpenGLVertexArrayObject m_vao;
 
   GLuint m_textureId{0};
+  QSize    m_textureSize;       // Cache texture size for reuse
 
   VideoFrame m_currentFrame;
   bool       m_frameNeedsUpdate{false};
