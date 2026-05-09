@@ -20,7 +20,7 @@ jobs:
     - name: Install Linux packages
       run: |
         sudo apt-get update
-        sudo apt-get install qt6-base-dev
+        sudo apt-get install qt6-base-dev libgl1-mesa-dev libglu1-mesa-dev 
     - name: Build
       run: |
         cd $GITHUB_WORKSPACE
