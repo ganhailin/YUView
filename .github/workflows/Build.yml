@@ -13,7 +13,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - run: git fetch --prune --unshallow
@@ -36,7 +36,7 @@ jobs:
       matrix:
         os: [macos-15]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - run: git fetch --prune --unshallow
@@ -57,7 +57,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, macos-15]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - run: git fetch --prune --unshallow
@@ -127,7 +127,7 @@ jobs:
         mkdir $GITHUB_WORKSPACE/artifacts
         cp YUView.AppImage $GITHUB_WORKSPACE/artifacts/
     - name: Upload Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{steps.artifacts.outputs.outputZip}}
         path: artifacts
@@ -142,7 +142,7 @@ jobs:
       matrix:
         autoUpdate: [true, false]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: true
     - uses: ilammy/msvc-dev-cmd@v1
@@ -214,19 +214,19 @@ jobs:
         cp deployment/wix/bin/Release/YUViewSetup.msi ./
     - name: Upload Artifact (Autoupdate)
       if: matrix.autoUpdate == true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: YUView-windows-2022-autoupdate.zip
         path: artifacts
     - name: Upload Artifact (Autoupdate disabled)
       if: matrix.autoUpdate == false
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: YUView-windows-2022.zip
         path: artifacts
     - name: Upload Windows installer Artifact
       if: matrix.autoUpdate == true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: YYUView-windows-2022.msi
         path: ./YUViewSetup.msi
