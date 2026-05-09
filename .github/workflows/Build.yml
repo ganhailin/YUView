@@ -21,8 +21,9 @@ jobs:
       id: artifacts
       shell: bash
       run: echo "outputZip=YUView-${{ matrix.os }}.zip" >> "$GITHUB_OUTPUT"
-    - name: Install packages
-      run: brew install qt
+    - uses: gerlero/brew-install@v1
+      with:
+        packages: qt
     - name: Download libde265 (Mac)
       if: runner.os == 'macOS'
       run: curl -L https://github.com/ChristianFeldmann/libde265/releases/download/v1.1/libde265.dylib -o libde265-internals.dylib
