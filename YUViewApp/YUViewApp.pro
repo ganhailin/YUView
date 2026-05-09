@@ -1,5 +1,9 @@
 QT += core gui widgets opengl xml concurrent network
 
+equals(QT_MAJOR_VERSION, 6) {
+    QT += openglwidgets
+}
+
 TARGET = YUView
 TEMPLATE = app
 CONFIG += c++17

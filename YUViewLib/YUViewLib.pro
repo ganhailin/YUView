@@ -1,5 +1,9 @@
 QT += core gui widgets opengl xml concurrent network
 
+equals(QT_MAJOR_VERSION, 6) {
+    QT += openglwidgets
+}
+
 TEMPLATE = lib
 CONFIG += staticlib
 CONFIG += c++17

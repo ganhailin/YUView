@@ -46,13 +46,23 @@ static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
 
 HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
 {
+  // Disable auto-fill background to prevent Qt from clearing our OpenGL content
+  setAutoFillBackground(false);
+  setAttribute(Qt::WA_OpaquePaintEvent);
+
   QSurfaceFormat format;
+  format.setProfile(QSurfaceFormat::CoreProfile);
+  format.setVersion(3, 3);
+
+#ifndef Q_OS_MAC
+  // 10-bit color buffers are not reliably supported on macOS
+  // Only request them on other platforms
   format.setRedBufferSize(10);
   format.setGreenBufferSize(10);
   format.setBlueBufferSize(10);
   format.setAlphaBufferSize(10);
-  format.setProfile(QSurfaceFormat::CoreProfile);
-  format.setVersion(3, 3);
+#endif
+
   setFormat(format);
 
   // Create pixel overlay widget
@@ -105,6 +115,7 @@ void HDR10Widget::updatePixelOverlay()
 
 void HDR10Widget::initializeGL()
 {
+  qDebug() << "HDR10Widget::initializeGL() called";
   initializeOpenGLFunctions();
 
   const char *version  = reinterpret_cast<const char *>(glGetString(GL_VERSION));
@@ -251,6 +262,7 @@ void HDR10Widget::updateTexture()
 
 void HDR10Widget::resizeGL(int w, int h)
 {
+  qDebug() << "HDR10Widget::resizeGL() called:" << w << "x" << h;
   glViewport(0, 0, w, h);
 
   // Update pixel overlay geometry to match
@@ -260,17 +272,40 @@ void HDR10Widget::resizeGL(int w, int h)
 
 void HDR10Widget::paintGL()
 {
-  glClearColor(140.f/255.f, 140.f/255.f, 140.f/255.f, 0);
+  qDebug() << "HDR10Widget::paintGL() called, size:" << width() << "x" << height() << "frame:" << m_frameSize.width() << "x" << m_frameSize.height();
+
+  // Bind the correct framebuffer (QOpenGLWidget uses an internal FBO)
+  // Use defaultFramebufferObject() instead of bindDefault()
+  glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+
+  // Disable depth testing for 2D rendering
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glDisable(GL_SCISSOR_TEST);
+
+  // Set viewport to full widget size
+  glViewport(0, 0, width() * devicePixelRatio(), height() * devicePixelRatio());
+
+  // Clear to red to debug
+  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
   if (!m_program || !m_programDither)
+  {
+    qDebug() << "HDR10Widget::paintGL() - shaders not initialized";
     return;
+  }
 
   if (m_frameNeedsUpdate)
     updateTexture();
 
   if (m_textureId == 0)
+  {
+    // No frame to render, but we still need to flush the clear
+    glFinish();
+    qDebug() << "HDR10Widget::paintGL() - no frame, cleared only";
     return;
+  }
 
   // Calculate vertex positions that match SplitViewWidget's behavior
   // SplitViewWidget: videoRect.setSize(QSize(frameSize.width * zoom, frameSize.height * zoom))
@@ -282,7 +317,10 @@ void HDR10Widget::paintGL()
   int frameH = m_frameSize.height();
   
   if (frameW <= 0 || frameH <= 0)
+  {
+    glFinish();
     return;
+  }
   
   // Calculate display size in pixels (same as SplitViewWidget)
   double displayW = frameW * m_zoom;
@@ -335,8 +373,18 @@ void HDR10Widget::paintGL()
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+  // Check for OpenGL errors
+  GLenum error = glGetError();
+  if (error != GL_NO_ERROR)
+    qDebug() << "HDR10Widget::paintGL() - OpenGL error:" << error;
+
   m_vao.release();
   currentProgram->release();
+
+  // Ensure rendering completes and is visible
+  glFinish();
+
+  qDebug() << "HDR10Widget::paintGL() - drawing complete";
 }
 
 void HDR10Widget::drawPixelValues(QPainter *painter)
@@ -586,6 +634,8 @@ HDR10Widget::PixelOverlay::PixelOverlay(HDR10Widget *parent)
   : QWidget(parent), hdrWidget(parent)
 {
   setAttribute(Qt::WA_TransparentForMouseEvents);
+  setAttribute(Qt::WA_TranslucentBackground);
+  setAutoFillBackground(false);
 }
 
 void HDR10Widget::PixelOverlay::paintEvent(QPaintEvent *)

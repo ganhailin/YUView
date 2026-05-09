@@ -31,6 +31,7 @@
 */
 
 #include <QCoreApplication>
+#include <QSurfaceFormat>
 
 #include <common/Typedef.h>
 #include <ui/YUViewApplication.h>
@@ -43,6 +44,16 @@ int main(int argc, char *argv[])
 #endif
   QCoreApplication::setAttribute(Qt::AA_SynthesizeMouseForUnhandledTouchEvents,false);
   QCoreApplication::setAttribute(Qt::AA_SynthesizeTouchForUnhandledMouseEvents,false);
+
+#ifdef Q_OS_MAC
+  // On macOS, set the default OpenGL surface format before creating QApplication
+  // This ensures the OpenGL context is created with the correct version
+  QSurfaceFormat format;
+  format.setRenderableType(QSurfaceFormat::OpenGL);
+  format.setProfile(QSurfaceFormat::CoreProfile);
+  format.setVersion(3, 3);
+  QSurfaceFormat::setDefaultFormat(format);
+#endif
 
   qRegisterMetaType<recacheIndicator>("recacheIndicator");
   

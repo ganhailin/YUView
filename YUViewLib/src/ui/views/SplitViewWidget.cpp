@@ -172,6 +172,7 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       hdr10Widget->setParent(this);
       // Position the HDR widget to cover the entire widget area
       // It will be raised below the QPainter overlays
+      hdr10Widget->setGeometry(0, 0, width(), height());
       hdr10Widget->raise();
 
       // Initialize zoom and offset
@@ -201,6 +202,14 @@ bool splitViewWidget::isHDRSupported() const
 {
   // HDR is supported if we have an HDR10Widget and it supports 10-bit output
   return hdr10Widget && hdr10Widget->supports10bit();
+}
+
+void splitViewWidget::resizeEvent(QResizeEvent *event)
+{
+  MoveAndZoomableView::resizeEvent(event);
+  // Update HDR10Widget geometry when SplitView is resized
+  if (hdr10Widget && hdr10Widget->isVisible())
+    hdr10Widget->setGeometry(0, 0, width(), height());
 }
 
 void splitViewWidget::paintEvent(QPaintEvent *)
