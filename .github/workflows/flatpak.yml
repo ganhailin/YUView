@@ -7,8 +7,6 @@ on:
   # Trigger the workflow if we merged into develop or if we create a release
   # Since the workflow takes significantly longer (because of the ffmpeg build) we want to execute 
   # this as little as possible.
-  push:
-    branches: [ develop ]
   release:
     branches: [ develop ]
     types:
