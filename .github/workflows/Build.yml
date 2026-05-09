@@ -7,7 +7,7 @@ on:
       - created
 
 jobs:
-  build-unix-native:
+  build-linux-native:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -112,7 +112,9 @@ jobs:
         cp libde265-internals.dylib build/YUViewApp/YUView.app/Contents/MacOS/.
         cd build/YUViewApp
         # Zip
-        zip -r ${{steps.artifacts.outputs.outputZip}} YUView.app/
+        xattr -cr YUView.app
+        codesign --force --deep --sign - YUView.app
+        ditto -c -k --sequesterRsrc --keepParent YUView.app ${{steps.artifacts.outputs.outputZip}}
         mkdir $GITHUB_WORKSPACE/artifacts
         cp ${{steps.artifacts.outputs.outputZip}} $GITHUB_WORKSPACE/artifacts/
     - name: Build Appimage (Linux)
