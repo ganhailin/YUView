@@ -46,6 +46,17 @@ namespace video
 // Forward declaration
 class FrameHandler;
 
+// HDR Metadata for EDR rendering
+struct HDRMetadata
+{
+  float maxContentLightLevel{1000.0f};      // MaxCLL in nits
+  float maxFrameAverageLightLevel{400.0f};  // MaxFALL in nits
+  enum TransferFunction { Linear = 0, PQ = 1, HLG = 2 };
+  TransferFunction transferFunction{PQ};
+  enum ColorSpace { BT709 = 0, BT2020 = 1, P3D65 = 2 };
+  ColorSpace colorSpace{BT2020};
+};
+
 class HDR10Widget : public QOpenGLWidget, protected QOpenGLFunctions
 {
   Q_OBJECT
@@ -63,6 +74,12 @@ public:
   void setShowRawData(bool show) { m_showRawData = show; update(); updatePixelOverlay(); }
   bool supports10bit() const { return m_supports10bit; }
   QString getOpenGLInfo() const { return m_openglInfo; }
+
+  // EDR support
+  bool isEDRAvailable() const { return m_edrAvailable; }
+  float getEDRHeadroom() const { return m_edrHeadroom; }
+  void setHDRMetadata(const HDRMetadata &metadata) { m_hdrMetadata = metadata; }
+  void enableEDR(bool enable);
 
 protected:
   void initializeGL() override;
@@ -91,11 +108,18 @@ private:
 
   QOpenGLShaderProgram *m_program{nullptr};
   QOpenGLShaderProgram *m_programDither{nullptr};
+  QOpenGLShaderProgram *m_programEDR{nullptr};  // EDR shader for HDR content
   QOpenGLBuffer         m_vbo{QOpenGLBuffer::VertexBuffer};
   QOpenGLVertexArrayObject m_vao;
 
   GLuint m_textureId{0};
   QSize    m_textureSize;       // Cache texture size for reuse
+
+  // EDR support
+  bool m_edrEnabled{false};       // User requested EDR
+  bool m_edrAvailable{false};     // EDR is actually available on this system
+  float m_edrHeadroom{1.0f};      // EDR brightness headroom (1.0 = SDR, 4.0 = 400 nits, etc.)
+  HDRMetadata m_hdrMetadata;      // HDR metadata for EDR rendering
 
   VideoFrame m_currentFrame;
   bool       m_frameNeedsUpdate{false};

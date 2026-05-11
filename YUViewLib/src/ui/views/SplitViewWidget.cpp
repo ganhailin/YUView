@@ -1351,6 +1351,20 @@ void splitViewWidget::toggleHDRDithering(bool checked)
   settings.setValue("View/HDRDithering", checked);
 }
 
+void splitViewWidget::toggleHDREDR(bool checked)
+{
+#ifdef Q_OS_MAC
+  if (hdr10Widget)
+    hdr10Widget->enableEDR(checked);
+
+  // Save the setting
+  QSettings settings;
+  settings.setValue("View/HDREDR", checked);
+#else
+  Q_UNUSED(checked)
+#endif
+}
+
 void splitViewWidget::resetViewInternal()
 {
   this->setSplittingPoint(0.5);
@@ -1907,6 +1921,22 @@ void splitViewWidget::createMenuActions()
                                 "8-bit displays.");
   actionHDRDithering.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
 
+  // HDR EDR action (macOS only)
+  configureAction(this->actionHDREDR,
+                  nullptr,
+                  "HDR EDR (macOS)",
+                  Checkable(true),
+                  Checked(false),
+                  &splitViewWidget::toggleHDREDR);
+  actionHDREDR.setToolTip("Enable Extended Dynamic Range (EDR) for HDR on macOS. "
+                          "Allows brightness values above 100 nits on HDR displays.");
+  actionHDREDR.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
+#ifdef Q_OS_MAC
+  actionHDREDR.setVisible(true);
+#else
+  actionHDREDR.setVisible(false);
+#endif
+
   if (this->isMasterView)
   {
     configureAction(this->actionSeparateView,
@@ -2137,6 +2167,7 @@ void splitViewWidget::addMenuActions(QMenu *menu)
   menu->addAction(&actionZoomBox);
   menu->addAction(&actionHDRRendering);
   menu->addAction(&actionHDRDithering);
+  menu->addAction(&actionHDREDR);
 
   auto separateViewMenu = menu->addMenu("Separate View");
   separateViewMenu->addAction(!isMasterView ? &this->getOtherWidget()->actionSeparateView

@@ -13,6 +13,11 @@ CONFIG += object_parallel_to_source
 SOURCES += $$files(src/*.cpp, true)
 HEADERS += $$files(src/*.h, true)
 
+macx {
+    # Include Objective-C++ source files for macOS-specific functionality
+    SOURCES += $$files(src/*.mm, true)
+}
+
 FORMS += $$files(ui/*.ui, false)
 
 INCLUDEPATH += src/
@@ -46,6 +51,13 @@ win32-msvc* {
 win32-g++ | linux | macx {
     HASHSTRING = '\\"$${LASTHASH}\\"'
     DEFINES += YUVIEW_HASH=\"$${HASHSTRING}\"
+}
+
+macx {
+    # Link against Cocoa and OpenGL frameworks for EDR support
+    LIBS += -framework Cocoa -framework OpenGL
+    # Ensure .mm files are compiled as Objective-C++
+    QMAKE_CXXFLAGS += -x objective-c++
 }
 
 VERSTR = '\\"$${SVNN}\\"'

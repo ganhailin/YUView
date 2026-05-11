@@ -170,6 +170,7 @@ private slots:
   void toggleFullScreen(bool checked);
   void toggleHDRRendering(bool checked);
   void toggleHDRDithering(bool checked);
+  void toggleHDREDR(bool checked);
 
 protected:
   // Set the widget to the given view mode
@@ -216,6 +217,7 @@ protected:
   QAction                       actionFullScreen;
   QAction                       actionHDRRendering;
   QAction                       actionHDRDithering;
+  QAction                       actionHDREDR;
 
   void         updateMouseTracking();
   virtual bool updateMouseCursor(const QPoint &srcMousePos) override;

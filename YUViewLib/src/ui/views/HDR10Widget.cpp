@@ -34,6 +34,10 @@
 #include <video/FrameHandler.h>
 #include <video/yuv/videoHandlerYUV.h>
 
+#ifdef Q_OS_MAC
+#include "YUViewMacOSEDRHelper.h"
+#endif
+
 #include <QDebug>
 #include <QSurfaceFormat>
 #include <QPainter>
@@ -55,7 +59,12 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
   format.setProfile(QSurfaceFormat::CoreProfile);
   format.setVersion(3, 3);
 
-#ifndef Q_OS_MAC
+#ifdef Q_OS_MAC
+  // On macOS, EDR is enabled via NSOpenGLView.wantsExtendedDynamicRangeOpenGLSurface
+  // This is done in initializeGL() via YUViewMacOSEDRHelper::enableEDR()
+  // Note: Qt doesn't have scRGBColorSpace; macOS EDR uses native API
+  qInfo() << "HDR10Widget: EDR support will be initialized in initializeGL()";
+#else
   // 10-bit color buffers are not reliably supported on macOS
   // Only request them on other platforms
   format.setRedBufferSize(10);
@@ -79,6 +88,7 @@ HDR10Widget::~HDR10Widget()
     glDeleteTextures(1, &m_textureId);
   delete m_program;
   delete m_programDither;
+  delete m_programEDR;
   doneCurrent();
 }
 
@@ -119,6 +129,33 @@ void HDR10Widget::setMoveOffset(QPointF offset)
   updatePixelOverlay(); // Update QPainter overlay
 }
 
+void HDR10Widget::enableEDR(bool enable)
+{
+#ifdef Q_OS_MAC
+  if (!YUViewMacOSEDRHelper::isEDRSupported())
+    return;
+
+  m_edrEnabled = enable;
+  if (enable && isVisible())
+  {
+    // Try to enable EDR on the native view
+    m_edrAvailable = YUViewMacOSEDRHelper::enableEDR(winId());
+    if (m_edrAvailable)
+    {
+      m_edrHeadroom = YUViewMacOSEDRHelper::getMaxEDRBrightness(winId());
+      qInfo() << "HDR10Widget: EDR enabled, headroom:" << m_edrHeadroom;
+    }
+    else
+    {
+      qWarning() << "HDR10Widget: Failed to enable EDR";
+    }
+  }
+  update();
+#else
+  Q_UNUSED(enable)
+#endif
+}
+
 void HDR10Widget::updatePixelOverlay()
 {
   if (m_pixelOverlay)
@@ -147,7 +184,24 @@ void HDR10Widget::initializeGL()
             << redBits << "/" << greenBits << "/" << blueBits << "bits)";
   }
 
+  // Check for EDR support on macOS
+#ifdef Q_OS_MAC
+  if (YUViewMacOSEDRHelper::isEDRSupported())
+  {
+    // Try to enable EDR on this view
+    m_edrAvailable = YUViewMacOSEDRHelper::enableEDR(winId());
+    if (m_edrAvailable)
+    {
+      m_edrHeadroom = YUViewMacOSEDRHelper::getMaxEDRBrightness(winId());
+      qInfo() << "HDR10Widget: EDR available, headroom:" << m_edrHeadroom
+              << "(color buffer:" << redBits << "/" << greenBits << "/" << blueBits << "bits)";
+    }
+  }
+#endif
+
   m_openglInfo = QString("OpenGL %1, Renderer: %2, %3-bit").arg(version, renderer).arg(m_bitDepth);
+  if (m_edrAvailable)
+    m_openglInfo += QString(", EDR headroom: %1x").arg(m_edrHeadroom);
 
   qInfo() << "HDR10Widget:" << m_openglInfo;
 
@@ -174,6 +228,14 @@ void HDR10Widget::initShaders()
                                            ":/shaders/hdr10_fragment_dither.glsl");
   if (!m_programDither->link())
     qWarning() << "HDR10Widget: Dither shader link error:" << m_programDither->log();
+
+  // Load EDR shader (available on all platforms, but only outputs >1.0 on EDR-enabled macOS)
+  m_programEDR = new QOpenGLShaderProgram(this);
+  m_programEDR->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
+  m_programEDR->addShaderFromSourceFile(QOpenGLShader::Fragment,
+                                        ":/shaders/hdr10_fragment_edr.glsl");
+  if (!m_programEDR->link())
+    qWarning() << "HDR10Widget: EDR shader link error:" << m_programEDR->log();
 
   m_textureLoc  = m_program->uniformLocation("texture16bit");
   m_bitDepthLoc = m_program->uniformLocation("bitDepth");
@@ -380,7 +442,30 @@ void HDR10Widget::paintGL()
   m_vbo.allocate(vertices, sizeof(vertices));
   m_vbo.release();
 
-  QOpenGLShaderProgram *currentProgram = m_ditheringEnabled ? m_programDither : m_program;
+  // Select shader program:
+  // 1. EDR shader: if EDR is available and enabled (macOS HDR)
+  // 2. Dither shader: if dithering is enabled (8-bit displays with high bit depth content)
+  // 3. Standard shader: default
+  QOpenGLShaderProgram *currentProgram = nullptr;
+  if (m_edrAvailable && m_edrEnabled && m_programEDR)
+  {
+    currentProgram = m_programEDR;
+  }
+  else if (m_ditheringEnabled && m_programDither)
+  {
+    currentProgram = m_programDither;
+  }
+  else
+  {
+    currentProgram = m_program;
+  }
+
+  if (!currentProgram)
+  {
+    glFinish();
+    return;
+  }
+
   currentProgram->bind();
   m_vao.bind();
 
@@ -388,9 +473,25 @@ void HDR10Widget::paintGL()
   glBindTexture(GL_TEXTURE_2D, m_textureId);
 
   glUniform1i(currentProgram->uniformLocation("texture16bit"), 0);
-  // Note: Both shaders now always normalize by 65535.0
-  // - Standard shader: direct normalization
-  // - Dithering shader: normalize then dither to 8-bit
+
+  // Set EDR-specific uniforms if using EDR shader
+  if (currentProgram == m_programEDR)
+  {
+    // Display brightness: assume SDR display is 100 nits, HDR is based on headroom
+    float maxDisplayBrightness = 100.0f * m_edrHeadroom;
+    // Content brightness: from HDR metadata (default 1000 nits for HDR10)
+    float maxContentBrightness = m_hdrMetadata.maxContentLightLevel;
+    // Transfer function: 0=Linear, 1=PQ, 2=HLG
+    int transferFunction = m_hdrMetadata.transferFunction;
+    // Color space: 0=BT.709, 1=BT.2020, 2=P3
+    int colorSpace = m_hdrMetadata.colorSpace;
+
+    glUniform1f(currentProgram->uniformLocation("maxDisplayBrightness"), maxDisplayBrightness);
+    glUniform1f(currentProgram->uniformLocation("maxContentBrightness"), maxContentBrightness);
+    glUniform1f(currentProgram->uniformLocation("edrHeadroom"), m_edrHeadroom);
+    glUniform1i(currentProgram->uniformLocation("transferFunction"), transferFunction);
+    glUniform1i(currentProgram->uniformLocation("colorSpace"), colorSpace);
+  }
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
