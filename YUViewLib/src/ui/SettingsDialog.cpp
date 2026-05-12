@@ -101,7 +101,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     ui.comboBoxSplitLineStyle->setCurrentIndex(1);
   else
     ui.comboBoxSplitLineStyle->setCurrentIndex(0);
-  const auto mouseModeString = settings.value("MouseMode", "Left Zoom, Right Move").toString();
+  const auto mouseModeString = settings.value("MouseMode", "Left Move, Right Zoom").toString();
   if (mouseModeString == "Left Zoom, Right Move")
     ui.comboBoxMouseMode->setCurrentIndex(0);
   else
