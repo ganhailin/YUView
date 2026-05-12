@@ -119,3 +119,49 @@
 - **渲染**: OpenGL (Core Profile 3.3+)
 - **扩展性**: 通过 `videoHandler` 接口可以轻松增加新的视频格式支持。
 - **跨平台性**: 源码高度抽象，一份代码同时支持 Win/Mac/Linux。
+
+---
+
+## 5. 支持的格式 (Supported Formats)
+
+`YUView` 的强大之处在于其极其灵活的格式配置能力，涵盖了从原始像素数据到先进压缩比特流的广泛范围。
+
+### A. 原始 YUV (Raw YUV)
+支持几乎所有常见的 YUV 变体：
+- **采样格式 (Subsampling)**: 4:0:0 (灰度), 4:2:0, 4:2:2, 4:4:4。
+- **位深 (Bit Depth)**: 8, 10, 12, 14, 16 bit。
+- **存储布局**:
+    - **Planar (平面)**: Y, U, V 分开存储（如 I420, YV12）。
+    - **Semi-Planar**: Y 平面独立，UV 交织存储（如 NV12, NV21）。
+    - **Packed (打包)**: 像素在内存中连续排列（如 YUY2, UYVY）。
+- **特殊预设格式**:
+    - **V210**: 10-bit 4:2:2 Packed 格式（常用于专业领域）。
+    - **NV15 / NV20 / NV30**: 针对特定平台优化的 10-bit 紧凑格式。
+
+### B. 原始 RGB (Raw RGB)
+支持自定义排列的 RGB 数据：
+- **通道顺序**: RGB, BGR, GBR, ARGB, RGBA 等。
+- **布局**: 支持 Packed 和 Planar 布局。
+- **位深**: 8, 10, 12, 14, 16 bit（注：RGB565 目前主要通过 FFmpeg 间接支持）。
+
+### C. 压缩视频比特流 (Annex B)
+`YUView` 具备强大的比特流解析和解码能力，支持直接打开原始码流文件：
+- **H.264 / AVC**
+- **H.265 / HEVC**: 支持内部解码器（HM, Libde265）和 FFmpeg 解码。
+- **H.266 / VVC**: 支持 VTM 参考软件和 VVDec 解码器。
+- **AV1**: 支持 Dav1d 和 FFmpeg 解码。
+- **MPEG-2**
+
+### D. 容器与图像格式
+- **视频容器**: 通过 FFmpeg 动态库支持 MP4, MKV, AVI, MOV 等。
+- **图像格式**: 
+    - 原生支持 **TGA (Targa)** 格式。
+    - 通过 Qt 框架支持 PNG, JPG, BMP, WebP 等。
+
+### E. 色彩空间 (Color Spaces)
+内置多种色彩空间转换系数，支持 HDR/SDR 切换：
+- **BT.601** (SD)
+- **BT.709** (HD)
+- **BT.2020** (UHD/HDR)
+- 支持 Limited Range 和 Full Range 切换。
+
