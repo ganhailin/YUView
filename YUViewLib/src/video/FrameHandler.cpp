@@ -286,7 +286,8 @@ VideoFrame FrameHandler::getCurrentFrameAsVideoFrame() const
     return currentVideoFrame;
 
   // Otherwise, create a VideoFrame from the current QImage
-  return VideoFrame(currentImage);
+  currentVideoFrame = VideoFrame(currentImage);
+  return currentVideoFrame;
 }
 
 void FrameHandler::drawPixelValues(QPainter *painter,

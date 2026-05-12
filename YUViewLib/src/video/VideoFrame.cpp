@@ -53,7 +53,7 @@ VideoFrame::VideoFrame(int width, int height) : image8bit(width, height, QImage:
 void VideoFrame::clear()
 {
   image8bit = QImage();
-  buffer16bit.clear();
+  buffer16bit.reset();
 }
 
 void VideoFrame::generate16bitBuffer()
@@ -66,12 +66,12 @@ void VideoFrame::generate16bitBuffer()
   const int numPixels = w * h;
   const int numComponents = numPixels * 4; // RGBA
 
-  buffer16bit.resize(numComponents);
+  buffer16bit = std::make_shared<QVector<uint16_t>>(numComponents);
 
   const uchar *srcBits = image8bit.constBits();
   const int   bytesPerLine = image8bit.bytesPerLine();
 
-  uint16_t *dst = buffer16bit.data();
+  uint16_t *dst = buffer16bit->data();
 
   for (int y = 0; y < h; y++)
   {
@@ -90,11 +90,12 @@ void VideoFrame::generate16bitBuffer()
       *dst++ = a * 257;
     }
   }
+  is16bitGenerateFrom8bit_ = true;
 }
 
 void VideoFrame::set16bitBuffer(QVector<uint16_t> &&data, int width, int height)
 {
-  buffer16bit = std::move(data);
+  buffer16bit = std::make_shared<QVector<uint16_t>>(std::move(data));
   if (image8bit.size() != QSize(width, height))
     image8bit = QImage(width, height, QImage::Format_ARGB32);
 }

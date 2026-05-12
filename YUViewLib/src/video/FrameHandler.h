@@ -142,7 +142,7 @@ signals:
 
 protected:
   QImage currentImage;
-  VideoFrame currentVideoFrame;
+  mutable VideoFrame currentVideoFrame;
   Size   frameSize;
 
   // Get the pixel value from currentImage. Make sure that currentImage is the correct image.

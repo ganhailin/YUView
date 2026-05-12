@@ -97,11 +97,17 @@ void HDR10Widget::setFrame(const VideoFrame &frame)
   // Only update if frame data actually changed
   // Compare 16-bit buffer pointers to detect if it's the same frame data
   const uint16_t *newData = frame.getData16bit();
-  const uint16_t *oldData = m_currentFrame.getData16bit();
-
-  if (newData != oldData || frame.getSize() != m_frameSize)
+  const uint16_t *oldData =
+    m_currentFrame.is16bitGenerateFrom8bit() ? nullptr : m_currentFrame.getData16bit();
+  auto new_size_empty = frame.getSize().isEmpty();
+  auto old_size_empty = m_frameSize.isEmpty();
+  if (newData != oldData || (new_size_empty != old_size_empty && (frame.getSize() != m_frameSize)))
   {
-    m_currentFrame     = frame;
+    // qDebug() << "HDR10Widget::setFrame: newData=" << newData << ", oldData=" << oldData
+    //          << ", frameSize=" << frame.getSize() << ", currentFrameSize=" << m_frameSize;
+    m_currentFrame = frame;
+    if (!newData)
+      m_currentFrame.clear16bitBuffer(); // Clear 16-bit buffer if new frame has no 16-bit data
     m_frameSize        = frame.getSize();
     m_frameNeedsUpdate = true;
     update();

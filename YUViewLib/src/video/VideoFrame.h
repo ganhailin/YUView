@@ -35,6 +35,7 @@
 #include <QSize>
 #include <QVector>
 #include <cstdint>
+#include <memory>
 
 namespace video
 {
@@ -66,10 +67,10 @@ public:
   const QImage &getImage8bit() const { return image8bit; }
   QImage &getImage8bit() { return image8bit; }
 
-  const uint16_t *getData16bit() const { return buffer16bit.data(); }
-  uint16_t *getData16bit() { return buffer16bit.data(); }
+  const uint16_t *getData16bit() const { return buffer16bit ? buffer16bit->data() : nullptr; }
+  uint16_t *getData16bit() { return buffer16bit ? buffer16bit->data() : nullptr; }
 
-  bool has16bitBuffer() const { return !buffer16bit.isEmpty(); }
+  bool has16bitBuffer() const { return buffer16bit && !buffer16bit->isEmpty(); }
 
   QSize getSize() const { return image8bit.size(); }
   int   width() const { return image8bit.width(); }
@@ -81,10 +82,13 @@ public:
   void generate16bitBuffer();
 
   void set16bitBuffer(QVector<uint16_t> &&data, int width, int height);
+  void clear16bitBuffer() { buffer16bit.reset(); }
+  bool is16bitGenerateFrom8bit() const { return is16bitGenerateFrom8bit_; }
 
 private:
+  bool is16bitGenerateFrom8bit_ = false;
   QImage          image8bit;
-  QVector<uint16_t> buffer16bit;
+  std::shared_ptr<QVector<uint16_t>> buffer16bit;
 };
 
 } // namespace video
