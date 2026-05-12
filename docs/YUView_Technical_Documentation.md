@@ -48,32 +48,46 @@
 
 ## 2. 组件原理与架构分析
 
-工程主要分为三个模块：`YUViewLib` (核心库)、`YUViewApp` (壳程序) 和 `YUViewUnitTest` (测试)。
+工程采用模块化设计，核心逻辑封装在 `YUViewLib` 中，通过高度抽象的接口支持多种格式的扩展。
 
-### A. YUViewLib (核心引擎)
-这是项目的灵魂，包含了所有视频处理、解析和 UI 逻辑。
-- **DataSource (数据源层)**:
-    - 抽象类 `IDataSource` 定义了基础 IO 操作。
-    - `DataSourceLocalFile` 实现了本地文件的随机访问。
-- **Video Logic (视频逻辑层)**:
-    - `VideoFrame`: 核心数据模型，存储原始像素数据。
-    - `videoHandler`: 针对不同格式（YUV, RGB, 序列帧等）的处理器基类。它负责从数据源读取数据并转换为 `VideoFrame`。
-    - `FrameHandler`: 协调层，管理多个 `videoHandler`，用于实现对比播放和同步。
-- **FFmpeg Integration (动态加载)**:
-    - 工程没有在编译时硬链接 FFmpeg。
-    - 而是通过 `FFmpegLibraryFunctions` 利用 `QLibrary` 在运行时动态寻找并加载系统中的 FFmpeg 库（如 `libavcodec`, `libavformat`）。这种设计使得发布二进制包时不需要携带庞大的 FFmpeg 库。
-- **UI & View (显示层)**:
-    - `SplitViewWidget`: 核心渲染窗口，支持分屏对比。它继承自 `MoveAndZoomableView`，利用 OpenGL 实现高性能的缩放和平移。
-    - `Statistics`: 统计分析模块，可在视频上叠加显示运动矢量、块划分等元数据。
+### A. 核心类层次结构 (Inheritance Hierarchy)
+`YUView` 的视频处理逻辑建立在严谨的继承体系之上：
+1.  **`FrameHandler`**: 基础逻辑类，定义了处理“单帧”图像的核心行为。
+    - 负责管理基本的帧尺寸 (`frameSize`)、色彩空间信息。
+    - 提供 `drawFrame` 基础接口和像素值查询 (`getPixelValues`)。
+    - 它是实现“对比视图”的基础，能够计算两个 handler 之间的差异。
+2.  **`videoHandler`**: 继承自 `FrameHandler`，增加了对“视频序列”的支持。
+    - **缓存机制**: 引入了 `cacheFrame` 逻辑，支持后台异步读取和多帧缓存管理。
+    - **格式嗅探**: 定义了 `guessAndSetPixelFormat` 接口，用于根据文件特征自动识别视频参数。
+3.  **特化处理器 (Specialized Handlers)**:
+    - **`videoHandlerYUV`**: 针对原始 YUV 数据的核心实现。处理平面格式、交织格式，支持各种采样率（4:2:0, 4:2:2, 4:4:4）和位深（8-16 bit）。
+    - **`videoHandlerRGB`**: 处理原始 RGB/BGR 文件及序列。
+    - **`videoHandlerFFmpeg`**: 通过封装 FFmpeg 库，支持 MP4, MKV, AVI 等主流容器格式的解码。
 
-### B. YUViewApp (应用程序)
-- 这是一个非常薄的包装层。
-- `main.cpp` 中负责设置高 DPI 支持、OpenGL 默认格式。
-- 初始化 `YUViewApplication` 类，该类负责解析命令行参数并启动 `MainWindow`。
+### B. 数据模型与渲染管线
+- **`VideoFrame` (双缓冲模型)**:
+    - 为了平衡兼容性与性能，`VideoFrame` 同时持有 8-bit 的 `QImage`（用于 QPainter 渲染 UI 组件）和可选的 16-bit 高位深 Buffer（用于 OpenGL 高性能渲染）。
+    - 16-bit 缓冲区通常以 RGBA 64-bit (16-bit per channel) 存储，确保 HDR 和高位深素材不失真。
+- **渲染流程**:
+    1.  用户触发跳转，`videoHandler` 接收到 `frameIndex` 请求。
+    2.  若不在缓存中，从 `IDataSource` (如 `DataSourceLocalFile`) 读取原始字节。
+    3.  通过 `PixelFormatYUV/RGB` 类进行颜色空间转换。
+    4.  生成的 `VideoFrame` 存入缓存。
+    5.  `SplitViewWidget` 调用 OpenGL Shader 将像素绘制到屏幕上，利用 GPU 进行插值和颜色映射。
 
-### C. YUViewUnitTest (质量保证)
-- 基于 `GoogleTest`。
-- 重点对 `common` 工具类、`video` 像素格式转换、`parser` 比特流解析等非 UI 核心逻辑进行覆盖测试。
+### C. 关键子系统原理
+- **FFmpeg 动态加载**:
+    - **解耦设计**: `YUView` 不直接链接 FFmpeg。`FFmpegLibraryFunctions` 类在运行时通过 `QLibrary::resolve` 查找系统路径下的 `libavcodec.59.dylib` 等。
+    - **Wrapper 封装**: 对 FFmpeg 的 `AVPacket`, `AVFrame`, `AVCodecContext` 进行了 RAII 封装（如 `AVFrameWrapper`），有效防止了内存泄漏。
+- **统计分析与叠加 (Statistics)**:
+    - 这是一个解耦的覆盖层系统。`StatisticsHandler` 负责解析特定格式（如 HEVC 内部信息、外部 CSV 统计），并将数据映射到视频网格中。
+    - 支持热力图显示、运动矢量箭头绘制等。
+- **对比与差异计算**:
+    - `videoHandlerDifference` 是一个特殊的处理器，它持有两个输入 handler，在读取时实时计算两者的差值（支持 YUV 分量差值或 RGB 色度差值），并可选地进行放大显示（Amplification）。
+
+### D. 并行与性能
+- **多线程解码**: 利用 `QtConcurrent` 和 `QThreadPool` 进行异步帧读取和转换，避免界面卡顿。
+- **内存映射**: 对于超大原始 YUV 文件，底层 `DataSource` 能够利用文件指针定位，实现“秒开”大文件。
 
 ---
 
