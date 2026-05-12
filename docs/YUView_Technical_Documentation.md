@@ -1,6 +1,6 @@
 # YUView 技术文档
 
-`YUView` 是一款基于 Qt 的跨平台开源 YUV 播放器及分析工具，支持多种视频格式、像素格式和高级分析功能（如 HEVC 比特流解析、对比视图等）。
+`YUView` 是一款基于 Qt 的跨平台开源 YUV 播放器及分析工具，支持多种视频格式、像素格式 and 高级分析功能（如 HEVC 比特流解析、对比视图等）。
 
 ---
 
@@ -73,7 +73,7 @@
     2.  若不在缓存中，从 `IDataSource` (如 `DataSourceLocalFile`) 读取原始字节。
     3.  通过 `PixelFormatYUV/RGB` 类进行颜色空间转换。
     4.  生成的 `VideoFrame` 存入缓存。
-    5.  `SplitViewWidget` 调用 OpenGL Shader 将像素绘制到屏幕上，利用 GPU 进行插值和颜色映射。
+    5.  `SplitViewWidget` 调用 OpenGL Shader 将像素绘制到屏幕上，利用 GPU 进行插值 and 颜色映射。
 
 ### C. 关键子系统原理
 - **FFmpeg 动态加载**:
@@ -88,6 +88,34 @@
 ### D. 并行与性能
 - **多线程解码**: 利用 `QtConcurrent` 和 `QThreadPool` 进行异步帧读取和转换，避免界面卡顿。
 - **内存映射**: 对于超大原始 YUV 文件，底层 `DataSource` 能够利用文件指针定位，实现“秒开”大文件。
+
+### E. 交互逻辑与手势 (Interaction & Gestures)
+`YUView` 为主视图提供了丰富的交互支持，特别是在 macOS 触控板环境下，通过对 Qt 手势事件的深度集成，实现了缩放、平移和快捷导航。
+
+1. **核心类实现**:
+    - **`MoveAndZoomableView`**: 交互基类，实现了缩放算法、平移逻辑以及 `QGestureEvent` 的基础分发。它通过 `grabGesture` 捕获 `SwipeGesture` 和 `PinchGesture`。
+    - **`splitViewWidget`**: 业务层派生类，重写了 `onSwipe...` 系列虚函数，将物理轻扫手势映射为播放逻辑（如跳帧）。
+
+2. **鼠标/触控板模式 (Mouse Modes)**:
+    `YUView` 提供两种主要的鼠标操作模式，决定了“左键”和“右键”的语义。
+    - **模式 A (MOUSE_RIGHT_MOVE)**: 左键画框缩放，右键平移。
+    - **模式 B (MOUSE_LEFT_MOVE)**: 左键平移，右键画框缩放。
+    - **配置指南**: 对于开启了 macOS **“三指拖移”** 的用户，建议切换到 **模式 B** (可在 Display Settings 或右键菜单的 "Mouse Mode" 中修改)，这样三指滑动即可直接平移画面。
+
+3. **macOS 手势映射**:
+    - **缩放 (Pinch)**: 触发 `Qt::PinchGesture`，实现以手指为中心的平滑缩放。
+    - **双指滚动 (Wheel)**: 映射为 `QWheelEvent`，在 YUView 中默认用于快速缩放。
+    - **轻扫导航 (Swipe)**: 三指/四指水平滑动切换帧，垂直滑动切换播放列表项。
+
+4. **交互行为总结表**:
+
+| 操作方式 | 默认功能 (模式 B - MOUSE_LEFT_MOVE) | macOS 系统设置影响 ("三指拖移") |
+| :--- | :--- | :--- |
+| **双指捏合** | 平滑缩放 | - |
+| **双指滑动** | 快速缩放 (Wheel 模拟) | - |
+| **单指按压滑动** | 平移画面 (Dragging) | - |
+| **三指滑动** | 切换帧/文件 (Swipe) | 若系统开启“三指拖移”，则会被模拟为单指按压，直接触发**平移画面** |
+| **四指轻扫** | 切换帧/文件 (Swipe) | 若三指被“三指拖移”占用，系统通常需要四指来触发 Swipe 事件 |
 
 ---
 
@@ -148,8 +176,8 @@
 `YUView` 具备强大的比特流解析和解码能力，支持直接打开原始码流文件：
 - **H.264 / AVC**
 - **H.265 / HEVC**: 支持内部解码器（HM, Libde265）和 FFmpeg 解码。
-- **H.266 / VVC**: 支持 VTM 参考软件和 VVDec 解码器。
-- **AV1**: 支持 Dav1d 和 FFmpeg 解码。
+- **H.266 / VVC**: 支持 VTM 参考软件 and VVDec 解码器。
+- **AV1**: 支持 Dav1d and FFmpeg 解码。
 - **MPEG-2**
 
 ### D. 容器与图像格式
@@ -164,4 +192,3 @@
 - **BT.709** (HD)
 - **BT.2020** (UHD/HDR)
 - 支持 Limited Range 和 Full Range 切换。
-
