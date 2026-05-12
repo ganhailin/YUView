@@ -754,7 +754,7 @@ void MoveAndZoomableView::updateSettings()
   paletteNeedsUpdate = true;
 
   // Load the mouse mode
-  QString mouseModeString = settings.value("MouseMode", "Left Zoom, Right Move").toString();
+  QString mouseModeString = settings.value("MouseMode", "Left Move, Right Zoom").toString();
   if (mouseModeString == "Left Zoom, Right Move")
     this->mouseMode = MOUSE_RIGHT_MOVE;
   else
