@@ -122,7 +122,9 @@ std::vector<rgb::PixelFormatRGB> videoHandlerRGB::formatPresetList = {
     PixelFormatRGB(8, DataLayout::Packed, ChannelOrder::BRG),
     PixelFormatRGB(10, DataLayout::Packed, ChannelOrder::BRG),
     PixelFormatRGB(10, DataLayout::Planar, ChannelOrder::RGB),
-    PixelFormatRGB(PredefinedRGBFormat::AB30)};
+    PixelFormatRGB(PredefinedRGBFormat::AB30),
+    PixelFormatRGB(PredefinedRGBFormat::RGB565),
+};
 
 videoHandlerRGB::videoHandlerRGB() : videoHandler()
 {

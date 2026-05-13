@@ -288,4 +288,36 @@ TEST(ConversionRGBTest, TestConversionOfSinglePlaneToRGBA)
   runTestForAllParameters(testConversionToRGBASinglePlane);
 }
 
+TEST(ConversionRGBTest, testRGB565Conversion)
+{
+  // Test with one pixel: Red (31), Green (63), Blue (31) -> 0xFFFF
+  // In 8-bit this should be 255, 255, 255
+  QByteArray data;
+  data.resize(2);
+  data[0] = 0xFF;
+  data[1] = 0xFF;
+
+  UChaVector output;
+  output.resize(4);
+
+  PixelFormatRGB format = PixelFormatRGB::rgb565();
+  bool inversion[4] = {false, false, false, false};
+  int scale[4] = {1, 1, 1, 1};
+
+  convertInputRGBToARGB(data, format, output.data(), Size(1, 1), inversion, scale, false, false, false);
+
+  EXPECT_EQ(output[0], 255); // B
+  EXPECT_EQ(output[1], 255); // G
+  EXPECT_EQ(output[2], 255); // R
+  EXPECT_EQ(output[3], 255); // A
+
+  // Test with Green only: 0x07E0 (00000 111111 00000)
+  data[0] = 0xE0;
+  data[1] = 0x07;
+  convertInputRGBToARGB(data, format, output.data(), Size(1, 1), inversion, scale, false, false, false);
+  EXPECT_EQ(output[0], 0);   // B
+  EXPECT_EQ(output[1], 255); // G
+  EXPECT_EQ(output[2], 0);   // R
+}
+
 } // namespace video::rgb::test
