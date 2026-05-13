@@ -244,55 +244,6 @@ rgba_t getPixelValue(const QByteArray     &sourceBuffer,
 
 } // namespace
 
-// AB30 helper functions
-namespace {
-
-// Expand 2-bit alpha to 8-bit using replication (same as Python reference)
-inline uint8_t expandAlpha2To8(uint8_t a2)
-{
-  if (a2 == 0)
-    return 0;
-  if (a2 == 3)
-    return 255;
-  // Replicate pattern: 0b01 -> 0b01010101 (0x55), 0b10 -> 0b10101010 (0xAA)
-  return (a2 << 6) | (a2 << 4) | (a2 << 2) | a2;
-}
-
-// Expand 2-bit alpha to 16-bit using replication
-inline uint16_t expandAlpha2To16(uint8_t a2)
-{
-  if (a2 == 0)
-    return 0;
-  if (a2 == 3)
-    return 65535;
-  // Replicate pattern to 16 bits
-  uint16_t a8 = expandAlpha2To8(a2);
-  return (a8 << 8) | a8;
-}
-
-} // namespace
-
-// Forward declarations for AB30 conversion functions
-void convertAB30ToARGB(const QByteArray &sourceBuffer,
-                       unsigned char *   targetBuffer,
-                       const Size        frameSize,
-                       const bool        componentInvert[4],
-                       const int         componentScale[4],
-                       const bool        limitedRange,
-                       const bool        outputHasAlpha,
-                       const bool        premultiplyAlpha);
-
-rgba_t getAB30PixelValue(const QByteArray &sourceBuffer,
-                         const Size        frameSize,
-                         const QPoint     &pixelPos);
-
-void convertAB30To16BitRGBA(const QByteArray &sourceBuffer,
-                            uint16_t *       targetBuffer,
-                            const Size       frameSize,
-                            const bool       componentInvert[4],
-                            const int        componentScale[4],
-                            const bool       limitedRange);
-
 void convertInputRGBToARGB(const QByteArray     &sourceBuffer,
                            const PixelFormatRGB &srcPixelFormat,
                            unsigned char        *targetBuffer,
@@ -364,6 +315,22 @@ void convertSinglePlaneOfRGBToGreyscaleARGB(const QByteArray     &sourceBuffer,
                                             const bool            invert,
                                             const bool            limitedRange)
 {
+  // Check for predefined formats first
+  if (srcPixelFormat.getPredefinedFormat())
+  {
+    if (auto handler = srcPixelFormat.getPredefinedHandler())
+    {
+      handler->convertToGreyscaleARGB(sourceBuffer,
+                                      targetBuffer,
+                                      frameSize,
+                                      displayChannel,
+                                      scale,
+                                      invert,
+                                      limitedRange);
+      return;
+    }
+  }
+
   const auto bitsPerSample = srcPixelFormat.getBitsPerSample();
   if (bitsPerSample < 8 || bitsPerSample > 32)
     throw std::invalid_argument("Invalid bit depth in pixel format for conversion");
@@ -571,177 +538,6 @@ void convertRGBTo16BitRGBA(const QByteArray     &sourceBuffer,
   else
     convertRGBTo16BitRGBAInternal<32>(
         sourceBuffer, srcPixelFormat, targetBuffer, frameSize, componentInvert, componentScale, limitedRange);
-}
-
-void convertAB30ToARGB(const QByteArray &sourceBuffer,
-                       unsigned char *   targetBuffer,
-                       const Size        frameSize,
-                       const bool        componentInvert[4],
-                       const int         componentScale[4],
-                       const bool        limitedRange,
-                       const bool        outputHasAlpha,
-                       const bool        premultiplyAlpha)
-{
-  const auto numPixels = frameSize.width * frameSize.height;
-  const auto *src      = reinterpret_cast<const uint32_t *>(sourceBuffer.data());
-
-  for (unsigned i = 0; i < numPixels; i++)
-  {
-    uint32_t value = src[i];
-
-    // Extract AB30 components (little endian)
-    // bits 31-30: Alpha[1:0]
-    // bits 29-20: Blue[9:0]
-    // bits 19-10: Green[9:0]
-    // bits  9-0 : Red[9:0]
-    uint8_t  a2  = (value >> 30) & 0x3;
-    uint16_t b10 = (value >> 20) & 0x3FF;
-    uint16_t g10 = (value >> 10) & 0x3FF;
-    uint16_t r10 = value & 0x3FF;
-
-    // Convert to 8-bit (shift right by 2 for RGB, expand alpha)
-    uint8_t a8 = expandAlpha2To8(a2);
-    uint8_t b8 = b10 >> 2;
-    uint8_t g8 = g10 >> 2;
-    uint8_t r8 = r10 >> 2;
-
-    // Apply scale and inversion
-    auto applyTransform = [](uint8_t val, int scale, bool invert) -> uint8_t
-    {
-      int v = (val * scale) >> 8;
-      v     = functions::clip(v, 0, 255);
-      if (invert)
-        v = 255 - v;
-      return static_cast<uint8_t>(v);
-    };
-
-    r8 = applyTransform(r8, componentScale[0], componentInvert[0]);
-    g8 = applyTransform(g8, componentScale[1], componentInvert[1]);
-    b8 = applyTransform(b8, componentScale[2], componentInvert[2]);
-    a8 = applyTransform(a8, componentScale[3], componentInvert[3]);
-
-    if (limitedRange)
-    {
-      r8 = LimitedRangeToFullRange.at(r8);
-      g8 = LimitedRangeToFullRange.at(g8);
-      b8 = LimitedRangeToFullRange.at(b8);
-    }
-
-    if (premultiplyAlpha && a8 != 255)
-    {
-      r8 = (r8 * a8) / 255;
-      g8 = (g8 * a8) / 255;
-      b8 = (b8 * a8) / 255;
-    }
-
-    // Output in BGRA order (QImage format)
-    targetBuffer[0] = b8;
-    targetBuffer[1] = g8;
-    targetBuffer[2] = r8;
-    targetBuffer[3] = a8;
-
-    targetBuffer += 4;
-  }
-}
-
-rgba_t getAB30PixelValue(const QByteArray &sourceBuffer,
-                         const Size        frameSize,
-                         const QPoint     &pixelPos)
-{
-  if (pixelPos.x() < 0 || pixelPos.x() >= static_cast<int>(frameSize.width) ||
-      pixelPos.y() < 0 || pixelPos.y() >= static_cast<int>(frameSize.height))
-    return {};
-
-  const auto pixelOffset = pixelPos.y() * frameSize.width + pixelPos.x();
-  const auto *src          = reinterpret_cast<const uint32_t *>(sourceBuffer.data());
-  uint32_t   value         = src[pixelOffset];
-
-  // Extract AB30 components
-  uint8_t  a2  = (value >> 30) & 0x3;
-  uint16_t b10 = (value >> 20) & 0x3FF;
-  uint16_t g10 = (value >> 10) & 0x3FF;
-  uint16_t r10 = value & 0x3FF;
-
-  rgba_t result;
-  result.A = a2;
-  result.B = b10;
-  result.G = g10;
-  result.R = r10;
-
-  return result;
-}
-
-void convertAB30To16BitRGBA(const QByteArray &sourceBuffer,
-                            uint16_t *       targetBuffer,
-                            const Size       frameSize,
-                            const bool       componentInvert[4],
-                            const int        componentScale[4],
-                            const bool       limitedRange)
-{
-  const auto numPixels = frameSize.width * frameSize.height;
-  const auto *src      = reinterpret_cast<const uint32_t *>(sourceBuffer.data());
-
-  for (unsigned i = 0; i < numPixels; i++)
-  {
-    uint32_t value = src[i];
-
-    // Extract AB30 components
-    uint8_t  a2  = (value >> 30) & 0x3;
-    uint16_t b10 = (value >> 20) & 0x3FF;
-    uint16_t g10 = (value >> 10) & 0x3FF;
-    uint16_t r10 = value & 0x3FF;
-
-    // Convert to 16-bit (shift left by 6 for RGB, expand alpha)
-    uint16_t a16 = expandAlpha2To16(a2);
-    uint16_t b16 = b10 << 6;
-    uint16_t g16 = g10 << 6;
-    uint16_t r16 = r10 << 6;
-
-    // Apply scale and inversion
-    auto applyTransform = [](uint16_t val, int scale, bool invert) -> uint16_t
-    {
-      int64_t v = (static_cast<int64_t>(val) * scale);
-      v         = functions::clip(v, 0, 65535);
-      if (invert)
-        v = 65535 - v;
-      return static_cast<uint16_t>(v);
-    };
-
-    r16 = applyTransform(r16, componentScale[0], componentInvert[0]);
-    g16 = applyTransform(g16, componentScale[1], componentInvert[1]);
-    b16 = applyTransform(b16, componentScale[2], componentInvert[2]);
-    a16 = applyTransform(a16, componentScale[3], componentInvert[3]);
-
-    if (limitedRange)
-    {
-      // Apply limited range to full range conversion for 16-bit values
-      const auto limitedMin = 4096;  // 16 << 8
-      const auto limitedMax = 60160; // 235 << 8
-      const auto fullRange  = 65535;
-      const auto range      = limitedMax - limitedMin;
-
-      auto limitedToFull = [](uint16_t val, int min, int range, int full) -> uint16_t
-      {
-        if (val <= static_cast<uint16_t>(min))
-          return uint16_t(0);
-        if (val >= static_cast<uint16_t>(min + range))
-          return uint16_t(full);
-        return uint16_t(((static_cast<int64_t>(val) - min) * full) / range);
-      };
-
-      r16 = limitedToFull(r16, limitedMin, range, fullRange);
-      g16 = limitedToFull(g16, limitedMin, range, fullRange);
-      b16 = limitedToFull(b16, limitedMin, range, fullRange);
-    }
-
-    // Output in RGBA order
-    targetBuffer[0] = r16;
-    targetBuffer[1] = g16;
-    targetBuffer[2] = b16;
-    targetBuffer[3] = a16;
-
-    targetBuffer += 4;
-  }
 }
 
 } // namespace video::rgb

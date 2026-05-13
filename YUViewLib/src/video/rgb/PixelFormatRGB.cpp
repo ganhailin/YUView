@@ -160,7 +160,7 @@ public:
 
       // Apply scale and inversion
       auto applyTransform = [](uint8_t val, int scale, bool invert) -> uint8_t {
-        int v = (val * scale) >> 8;
+        int v = (val * scale);
         v = functions::clip(v, 0, 255);
         if (invert) v = 255 - v;
         return static_cast<uint8_t>(v);
@@ -259,16 +259,310 @@ public:
       targetBuffer += 4;
     }
   }
+
+  void convertToGreyscaleARGB(const QByteArray &sourceBuffer,
+                              unsigned char    *targetBuffer,
+                              const Size        frameSize,
+                              const Channel     displayChannel,
+                              const int         scale,
+                              const bool        invert,
+                              const bool        limitedRange) const override
+  {
+    const auto numPixels = frameSize.width * frameSize.height;
+    const auto *src = reinterpret_cast<const uint32_t *>(sourceBuffer.data());
+
+    for (unsigned i = 0; i < numPixels; i++)
+    {
+      uint32_t value = src[i];
+
+      // Extract AB30 components
+      uint16_t componentVal = 0;
+      if (displayChannel == Channel::Alpha)
+        componentVal = expandAlpha2To8((value >> 30) & 0x3);
+      else if (displayChannel == Channel::Blue)
+        componentVal = (value >> 20) & 0x3FF;
+      else if (displayChannel == Channel::Green)
+        componentVal = (value >> 10) & 0x3FF;
+      else if (displayChannel == Channel::Red)
+        componentVal = value & 0x3FF;
+
+      // Convert to 8-bit
+      uint8_t val8 = 0;
+      if (displayChannel == Channel::Alpha)
+        val8 = static_cast<uint8_t>(componentVal);
+      else
+        val8 = componentVal >> 2;
+
+      auto applyTransform = [](uint8_t val, int scale, bool invert) -> uint8_t {
+        int v = (val * scale);
+        v = functions::clip(v, 0, 255);
+        if (invert) v = 255 - v;
+        return static_cast<uint8_t>(v);
+      };
+
+
+      val8 = applyTransform(val8, scale, invert);
+
+      if (limitedRange && displayChannel != Channel::Alpha)
+      {
+        val8 = LimitedRangeToFullRange.at(val8);
+      }
+
+      targetBuffer[0] = val8;
+      targetBuffer[1] = val8;
+      targetBuffer[2] = val8;
+      targetBuffer[3] = 255;
+      targetBuffer += 4;
+    }
+  }
+};
+
+// RGB565 Handler implementation
+class RGB565Handler : public PredefinedRGBFormatHandler
+{
+public:
+  RGB565Handler(Endianness endianness) : endianness(endianness) {}
+
+  [[nodiscard]] std::string getName() const override
+  {
+    return endianness == Endianness::Big ? "RGB 565 BE" : "RGB 565";
+  }
+  [[nodiscard]] unsigned    getBitsPerSample() const override { return 16; }
+  [[nodiscard]] bool        hasAlpha() const override { return false; }
+  [[nodiscard]] unsigned    getNrChannels() const override { return 3; }
+
+  [[nodiscard]] std::size_t bytesPerFrame(Size frameSize) const override
+  {
+    return std::size_t(frameSize.width) * std::size_t(frameSize.height) * 2;
+  }
+
+  [[nodiscard]] int getChannelPosition(Channel channel) const override
+  {
+    switch (channel)
+    {
+      case Channel::Red:   return 0;
+      case Channel::Green: return 1;
+      case Channel::Blue:  return 2;
+      case Channel::Alpha: return -1;
+    }
+    return -1;
+  }
+
+  [[nodiscard]] Channel getChannelAtPosition(int position) const override
+  {
+    switch (position)
+    {
+      case 0: return Channel::Red;
+      case 1: return Channel::Green;
+      case 2: return Channel::Blue;
+    }
+    throw std::invalid_argument("Invalid position for RGB565");
+  }
+
+  [[nodiscard]] rgba_t getPixelValue(const QByteArray &sourceBuffer,
+                                    const Size        frameSize,
+                                    const QPoint     &pixelPos) const override
+  {
+    if (pixelPos.x() < 0 || pixelPos.x() >= static_cast<int>(frameSize.width) ||
+        pixelPos.y() < 0 || pixelPos.y() >= static_cast<int>(frameSize.height))
+      return {};
+
+    const auto      pixelOffset = pixelPos.y() * frameSize.width + pixelPos.x();
+    const uint16_t *src         = reinterpret_cast<const uint16_t *>(sourceBuffer.data());
+    uint16_t        val         = src[pixelOffset];
+
+    if (endianness == Endianness::Big)
+      val = ((val & 0xff) << 8) | ((val & 0xff00) >> 8);
+
+    rgba_t result;
+    result.R = (val >> 11) & 0x1F;
+    result.G = (val >> 5) & 0x3F;
+    result.B = val & 0x1F;
+    result.A = 0;
+
+    return result;
+  }
+
+  void convertToARGB(const QByteArray &sourceBuffer,
+                     unsigned char    *targetBuffer,
+                     const Size        frameSize,
+                     const bool        componentInvert[4],
+                     const int         componentScale[4],
+                     const bool        limitedRange,
+                     const bool        premultiplyAlpha) const override
+  {
+    const auto      numPixels = frameSize.width * frameSize.height;
+    const uint16_t *src       = reinterpret_cast<const uint16_t *>(sourceBuffer.data());
+
+    for (unsigned i = 0; i < numPixels; i++)
+    {
+      uint16_t val = src[i];
+      if (endianness == Endianness::Big)
+        val = ((val & 0xff) << 8) | ((val & 0xff00) >> 8);
+
+      int valR = (val >> 11) & 0x1F;
+      int valG = (val >> 5) & 0x3F;
+      int valB = val & 0x1F;
+
+      valR = (valR * 255) / 31;
+      valG = (valG * 255) / 63;
+      valB = (valB * 255) / 31;
+
+      auto applyTransform = [](int val, int scale, bool invert) -> uint8_t {
+        int v = (val * scale);
+        v     = functions::clip(v, 0, 255);
+        if (invert)
+          v = 255 - v;
+        return static_cast<uint8_t>(v);
+      };
+
+      uint8_t r8 = applyTransform(valR, componentScale[0], componentInvert[0]);
+      uint8_t g8 = applyTransform(valG, componentScale[1], componentInvert[1]);
+      uint8_t b8 = applyTransform(valB, componentScale[2], componentInvert[2]);
+      uint8_t a8 = 255;
+
+      if (limitedRange)
+      {
+        r8 = LimitedRangeToFullRange.at(r8);
+        g8 = LimitedRangeToFullRange.at(g8);
+        b8 = LimitedRangeToFullRange.at(b8);
+      }
+
+      // Output in BGRA order (QImage format)
+      targetBuffer[0] = b8;
+      targetBuffer[1] = g8;
+      targetBuffer[2] = r8;
+      targetBuffer[3] = a8;
+      targetBuffer += 4;
+    }
+  }
+
+  void convertTo16BitRGBA(const QByteArray &sourceBuffer,
+                          uint16_t         *targetBuffer,
+                          const Size        frameSize,
+                          const bool        componentInvert[4],
+                          const int         componentScale[4],
+                          const bool        limitedRange) const override
+  {
+    const auto      numPixels = frameSize.width * frameSize.height;
+    const uint16_t *src       = reinterpret_cast<const uint16_t *>(sourceBuffer.data());
+
+    for (unsigned i = 0; i < numPixels; i++)
+    {
+      uint16_t val = src[i];
+      if (endianness == Endianness::Big)
+        val = ((val & 0xff) << 8) | ((val & 0xff00) >> 8);
+
+      int valR = (val >> 11) & 0x1F;
+      int valG = (val >> 5) & 0x3F;
+      int valB = val & 0x1F;
+
+      valR = (valR * 65535) / 31;
+      valG = (valG * 65535) / 63;
+      valB = (valB * 65535) / 31;
+
+      auto applyTransform = [](int val, int scale, bool invert) -> uint16_t {
+        int64_t v = (static_cast<int64_t>(val) * scale);
+        v         = functions::clip(v, 0, 65535);
+        if (invert)
+          v = 65535 - v;
+        return static_cast<uint16_t>(v);
+      };
+
+      uint16_t r16 = applyTransform(valR, componentScale[0], componentInvert[0]);
+      uint16_t g16 = applyTransform(valG, componentScale[1], componentInvert[1]);
+      uint16_t b16 = applyTransform(valB, componentScale[2], componentInvert[2]);
+      uint16_t a16 = 65535;
+
+      if (limitedRange)
+      {
+        const auto limitedMin = 4096;
+        const auto limitedMax = 60160;
+        const auto fullRange  = 65535;
+        const auto range      = limitedMax - limitedMin;
+
+        auto limitedToFull = [](uint16_t val, int min, int range, int full) -> uint16_t {
+          if (val <= static_cast<uint16_t>(min))
+            return uint16_t(0);
+          if (val >= static_cast<uint16_t>(min + range))
+            return uint16_t(full);
+          return uint16_t(((static_cast<int64_t>(val) - min) * full) / range);
+        };
+
+        r16 = limitedToFull(r16, limitedMin, range, fullRange);
+        g16 = limitedToFull(g16, limitedMin, range, fullRange);
+        b16 = limitedToFull(b16, limitedMin, range, fullRange);
+      }
+
+      // Output in RGBA order
+      targetBuffer[0] = r16;
+      targetBuffer[1] = g16;
+      targetBuffer[2] = b16;
+      targetBuffer[3] = a16;
+      targetBuffer += 4;
+    }
+  }
+
+  void convertToGreyscaleARGB(const QByteArray &sourceBuffer,
+                              unsigned char    *targetBuffer,
+                              const Size        frameSize,
+                              const Channel     displayChannel,
+                              const int         scale,
+                              const bool        invert,
+                              const bool        limitedRange) const override
+  {
+    const auto      numPixels = frameSize.width * frameSize.height;
+    const uint16_t *src       = reinterpret_cast<const uint16_t *>(sourceBuffer.data());
+
+    for (unsigned i = 0; i < numPixels; i++)
+    {
+      uint16_t val = src[i];
+      if (endianness == Endianness::Big)
+        val = ((val & 0xff) << 8) | ((val & 0xff00) >> 8);
+
+      int componentVal = 0;
+      if (displayChannel == Channel::Red)
+        componentVal = (val >> 11) & 0x1F;
+      else if (displayChannel == Channel::Green)
+        componentVal = (val >> 5) & 0x3F;
+      else if (displayChannel == Channel::Blue)
+        componentVal = val & 0x1F;
+
+      if (displayChannel == Channel::Green)
+        componentVal = (componentVal * 255) / 63;
+      else
+        componentVal = (componentVal * 255) / 31;
+
+      componentVal = (componentVal * scale);
+      componentVal = functions::clip(componentVal, 0, 255);
+      if (invert)
+        componentVal = 255 - componentVal;
+      if (limitedRange)
+        componentVal = LimitedRangeToFullRange.at(componentVal);
+
+      targetBuffer[0] = componentVal;
+      targetBuffer[1] = componentVal;
+      targetBuffer[2] = componentVal;
+      targetBuffer[3] = 255;
+
+      targetBuffer += 4;
+    }
+  }
+
+private:
+  Endianness endianness;
 };
 
 // Factory function implementation
 std::unique_ptr<PredefinedRGBFormatHandler> createPredefinedRGBFormatHandler(
-    PredefinedRGBFormat format)
+    PredefinedRGBFormat format, Endianness endianness)
 {
   switch (format)
   {
     case PredefinedRGBFormat::AB30:
       return std::make_unique<AB30Handler>();
+    case PredefinedRGBFormat::RGB565:
+      return std::make_unique<RGB565Handler>(endianness);
   }
   return nullptr;
 }
@@ -276,7 +570,7 @@ std::unique_ptr<PredefinedRGBFormatHandler> createPredefinedRGBFormatHandler(
 std::unique_ptr<PredefinedRGBFormatHandler> PixelFormatRGB::getPredefinedHandler() const
 {
   if (this->predefinedFormat)
-    return createPredefinedRGBFormatHandler(*this->predefinedFormat);
+    return createPredefinedRGBFormatHandler(*this->predefinedFormat, this->endianness);
   return nullptr;
 }
 
@@ -290,13 +584,25 @@ PixelFormatRGB::PixelFormatRGB(unsigned     bitsPerSample,
 {
 }
 
+PixelFormatRGB PixelFormatRGB::rgb565(Endianness endianness)
+{
+  PixelFormatRGB fmt(PredefinedRGBFormat::RGB565);
+  fmt.endianness = endianness;
+  return fmt;
+}
+
 PixelFormatRGB::PixelFormatRGB(const std::string &name)
 {
   // Check for predefined formats first
   if (auto predefinedFormat = PredefinedRGBFormatMapper.getValue(name))
   {
-    if (*predefinedFormat == PredefinedRGBFormat::AB30)
-      this->predefinedFormat = predefinedFormat;
+    this->predefinedFormat = predefinedFormat;
+    return;
+  }
+
+  if (name == "RGB 565" || name == "RGB 565 BE")
+  {
+    *this = rgb565(name.find("BE") != std::string::npos ? Endianness::Big : Endianness::Little);
     return;
   }
 
@@ -340,7 +646,7 @@ std::optional<PredefinedRGBFormat> PixelFormatRGB::getPredefinedFormat() const
 bool PixelFormatRGB::isValid() const
 {
   if (this->predefinedFormat.has_value())
-    return createPredefinedRGBFormatHandler(*this->predefinedFormat) != nullptr;
+    return createPredefinedRGBFormatHandler(*this->predefinedFormat, this->endianness) != nullptr;
   return this->bitsPerSample >= 8 && this->bitsPerSample <= 32;
 }
 
@@ -348,7 +654,7 @@ unsigned PixelFormatRGB::nrChannels() const
 {
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->getNrChannels();
   }
   return this->alphaMode != AlphaMode::None ? 4 : 3;
@@ -358,7 +664,7 @@ bool PixelFormatRGB::hasAlpha() const
 {
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->hasAlpha();
   }
   return this->alphaMode != AlphaMode::None;
@@ -368,7 +674,7 @@ unsigned PixelFormatRGB::getBitsPerSample() const
 {
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->getBitsPerSample();
   }
   return this->bitsPerSample;
@@ -381,7 +687,7 @@ std::string PixelFormatRGB::getName() const
 
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->getName();
     return "Unknown Pixel Format";
   }
@@ -408,17 +714,16 @@ std::size_t PixelFormatRGB::bytesPerFrame(Size frameSize) const
 {
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->bytesPerFrame(frameSize);
     return 0;
   }
 
-  const auto bpsValid = this->bitsPerSample >= 8 && this->bitsPerSample <= 32;
-  if (!bpsValid || !frameSize.isValid())
+  if (!this->isValid() || !frameSize.isValid())
     return 0;
 
   auto numSamples = std::size_t(frameSize.height) * std::size_t(frameSize.width);
-  auto nrBytes    = numSamples * this->nrChannels() * ((this->bitsPerSample + 7) / 8);
+  auto nrBytes = numSamples * this->nrChannels() * ((this->bitsPerSample + 7) / 8);
   DEBUG_RGB_FORMAT("PixelFormatRGB::bytesPerFrame samples %d channels %d bytes %d",
                    int(numSamples),
                    this->nrChannels(),
@@ -430,7 +735,7 @@ int PixelFormatRGB::getChannelPosition(Channel channel) const
 {
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->getChannelPosition(channel);
     return -1;
   }
@@ -486,7 +791,7 @@ Channel PixelFormatRGB::getChannelAtPosition(int position) const
 {
   if (this->predefinedFormat)
   {
-    if (auto handler = createPredefinedRGBFormatHandler(*this->predefinedFormat))
+    if (auto handler = getPredefinedHandler())
       return handler->getChannelAtPosition(position);
     throw std::invalid_argument("Invalid predefined format");
   }

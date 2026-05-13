@@ -106,4 +106,23 @@ TEST(PixelFormatRGBTest, testInvalidFormats)
     EXPECT_FALSE(fmt.isValid()) << "Format " << fmt.getName() << " should be invalid.";
 }
 
+TEST(PixelFormatRGBTest, testRGB565)
+{
+  const auto fmt = PixelFormatRGB::rgb565();
+  EXPECT_TRUE(fmt.isValid());
+  EXPECT_TRUE(fmt.isRGB565());
+  EXPECT_EQ(fmt.getName(), "RGB 565");
+  EXPECT_EQ(fmt.nrChannels(), 3u);
+  EXPECT_FALSE(fmt.hasAlpha());
+
+  const auto fmtNew = PixelFormatRGB("RGB 565");
+  EXPECT_EQ(fmt, fmtNew);
+  EXPECT_TRUE(fmtNew.isRGB565());
+
+  const auto fmtBE = PixelFormatRGB::rgb565(Endianness::Big);
+  EXPECT_EQ(fmtBE.getName(), "RGB 565 BE");
+  const auto fmtBENew = PixelFormatRGB("RGB 565 BE");
+  EXPECT_EQ(fmtBE, fmtBENew);
+}
+
 } // namespace video::rgb::test

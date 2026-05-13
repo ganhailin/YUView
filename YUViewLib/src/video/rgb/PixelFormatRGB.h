@@ -55,13 +55,16 @@ enum class Channel
 
 // Predefined RGB formats that require special handling
 // AB30: DRM_FORMAT_ABGR2101010 - 32-bit packed format with A[1:0]:B[9:0]:G[9:0]:R[9:0]
+// RGB565: 16-bit packed format with R[4:0]:G[5:0]:B[4:0]
 enum class PredefinedRGBFormat
 {
-  AB30
+  AB30,
+  RGB565
 };
 
-constexpr EnumMapper<PredefinedRGBFormat, 1> PredefinedRGBFormatMapper = {
-    std::make_pair(PredefinedRGBFormat::AB30, "AB30")};
+constexpr EnumMapper<PredefinedRGBFormat, 2> PredefinedRGBFormatMapper = {
+    std::make_pair(PredefinedRGBFormat::AB30, "AB30"),
+    std::make_pair(PredefinedRGBFormat::RGB565, "RGB565")};
 
 constexpr EnumMapper<Channel, 4> ChannelMapper = {std::make_pair(Channel::Red, "Red"),
                                                   std::make_pair(Channel::Green, "Green"),
@@ -166,11 +169,19 @@ public:
                                   const bool        componentInvert[4],
                                   const int         componentScale[4],
                                   const bool        limitedRange) const = 0;
+
+  virtual void convertToGreyscaleARGB(const QByteArray &sourceBuffer,
+                                      unsigned char    *targetBuffer,
+                                      const Size        frameSize,
+                                      const Channel     displayChannel,
+                                      const int         scale,
+                                      const bool        invert,
+                                      const bool        limitedRange) const = 0;
 };
 
 // Factory function to get the appropriate handler for a predefined format
 std::unique_ptr<PredefinedRGBFormatHandler> createPredefinedRGBFormatHandler(
-    PredefinedRGBFormat format);
+    PredefinedRGBFormat format, Endianness endianness = Endianness::Little);
 
 enum class ChannelOrder
 {
@@ -216,11 +227,14 @@ public:
                  Endianness   endianness = Endianness::Little);
   PixelFormatRGB(PredefinedRGBFormat predefinedFormat); // Predefined format constructor
 
+  static PixelFormatRGB rgb565(Endianness endianness = Endianness::Little);
+
   std::optional<PredefinedRGBFormat> getPredefinedFormat() const;
 
   bool        isValid() const;
   unsigned    nrChannels() const;
   bool        hasAlpha() const;
+  bool        isRGB565() const { return this->predefinedFormat == PredefinedRGBFormat::RGB565; }
   std::string getName() const;
 
   unsigned     getBitsPerSample() const;
