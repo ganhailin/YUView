@@ -160,7 +160,7 @@ public:
 
       // Apply scale and inversion
       auto applyTransform = [](uint8_t val, int scale, bool invert) -> uint8_t {
-        int v = (val * scale);
+        int v = static_cast<int>(val) * scale;
         v = functions::clip(v, 0, 255);
         if (invert) v = 255 - v;
         return static_cast<uint8_t>(v);

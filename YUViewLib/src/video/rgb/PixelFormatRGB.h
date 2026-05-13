@@ -234,7 +234,6 @@ public:
   bool        isValid() const;
   unsigned    nrChannels() const;
   bool        hasAlpha() const;
-  bool        isRGB565() const { return this->predefinedFormat == PredefinedRGBFormat::RGB565; }
   std::string getName() const;
 
   unsigned     getBitsPerSample() const;
