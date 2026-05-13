@@ -36,6 +36,10 @@
 #include <common/Typedef.h>
 #include <video/PixelFormat.h>
 
+#include <memory>
+#include <QByteArray>
+#include <QPoint>
+
 #include <string>
 
 namespace video::rgb
@@ -48,6 +52,16 @@ enum class Channel
   Blue,
   Alpha
 };
+
+// Predefined RGB formats that require special handling
+// AB30: DRM_FORMAT_ABGR2101010 - 32-bit packed format with A[1:0]:B[9:0]:G[9:0]:R[9:0]
+enum class PredefinedRGBFormat
+{
+  AB30
+};
+
+constexpr EnumMapper<PredefinedRGBFormat, 1> PredefinedRGBFormatMapper = {
+    std::make_pair(PredefinedRGBFormat::AB30, "AB30")};
 
 constexpr EnumMapper<Channel, 4> ChannelMapper = {std::make_pair(Channel::Red, "Red"),
                                                   std::make_pair(Channel::Green, "Green"),
@@ -114,6 +128,50 @@ inline rgba_t convertBitness(rgba_t value, unsigned src_bitness, unsigned dst_bi
   });
 }
 
+// Interface for predefined RGB format handlers
+// Each predefined format should implement this interface to provide
+// format-specific operations without scattering switch statements throughout the code
+class PredefinedRGBFormatHandler
+{
+public:
+  virtual ~PredefinedRGBFormatHandler() = default;
+
+  // Format properties
+  [[nodiscard]] virtual std::string getName() const = 0;
+  [[nodiscard]] virtual unsigned    getBitsPerSample() const = 0;
+  [[nodiscard]] virtual bool        hasAlpha() const = 0;
+  [[nodiscard]] virtual unsigned    getNrChannels() const = 0;
+  [[nodiscard]] virtual std::size_t bytesPerFrame(Size frameSize) const = 0;
+
+  // Channel positions (for AB30: ABGR order)
+  [[nodiscard]] virtual int getChannelPosition(Channel channel) const = 0;
+  [[nodiscard]] virtual Channel getChannelAtPosition(int position) const = 0;
+
+  // Conversion functions
+  [[nodiscard]] virtual rgba_t getPixelValue(const QByteArray &sourceBuffer,
+                                              const Size        frameSize,
+                                              const QPoint     &pixelPos) const = 0;
+
+  virtual void convertToARGB(const QByteArray &sourceBuffer,
+                             unsigned char    *targetBuffer,
+                             const Size        frameSize,
+                             const bool        componentInvert[4],
+                             const int         componentScale[4],
+                             const bool        limitedRange,
+                             const bool        premultiplyAlpha) const = 0;
+
+  virtual void convertTo16BitRGBA(const QByteArray &sourceBuffer,
+                                  uint16_t         *targetBuffer,
+                                  const Size        frameSize,
+                                  const bool        componentInvert[4],
+                                  const int         componentScale[4],
+                                  const bool        limitedRange) const = 0;
+};
+
+// Factory function to get the appropriate handler for a predefined format
+std::unique_ptr<PredefinedRGBFormatHandler> createPredefinedRGBFormatHandler(
+    PredefinedRGBFormat format);
+
 enum class ChannelOrder
 {
   RGB,
@@ -156,19 +214,25 @@ public:
                  ChannelOrder channelOrder,
                  AlphaMode    alphaMode  = AlphaMode::None,
                  Endianness   endianness = Endianness::Little);
+  PixelFormatRGB(PredefinedRGBFormat predefinedFormat); // Predefined format constructor
+
+  std::optional<PredefinedRGBFormat> getPredefinedFormat() const;
 
   bool        isValid() const;
   unsigned    nrChannels() const;
   bool        hasAlpha() const;
   std::string getName() const;
 
-  unsigned     getBitsPerSample() const { return this->bitsPerSample; }
+  unsigned     getBitsPerSample() const;
   DataLayout   getDataLayout() const { return this->dataLayout; }
   ChannelOrder getChannelOrder() const { return this->channelOrder; }
   Endianness   getEndianess() const { return this->endianness; }
 
   void setBitsPerSample(unsigned bitsPerSample) { this->bitsPerSample = bitsPerSample; }
   void setDataLayout(DataLayout dataLayout) { this->dataLayout = dataLayout; }
+
+  // Get a handler for predefined formats (returns nullptr for standard formats)
+  std::unique_ptr<PredefinedRGBFormatHandler> getPredefinedHandler() const;
 
   std::size_t bytesPerFrame(Size frameSize) const;
   int         getChannelPosition(Channel channel) const;
@@ -180,6 +244,9 @@ public:
   bool operator!=(const std::string &a) const { return getName() != a; }
 
 private:
+  // Predefined format (optional). If set, other properties are ignored.
+  std::optional<PredefinedRGBFormat> predefinedFormat;
+
   unsigned     bitsPerSample{0};
   DataLayout   dataLayout{DataLayout::Packed};
   ChannelOrder channelOrder{ChannelOrder::RGB};
