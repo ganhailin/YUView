@@ -177,6 +177,14 @@ std::optional<PixelFormatRGB> checkSpecificFileExtensions(
       return format;
   }
 
+  // Check for "ab30" in filename
+  if (filename.find("ab30") != std::string::npos || filename.find("AB30") != std::string::npos)
+  {
+    const auto format = PixelFormatRGB(PredefinedRGBFormat::AB30);
+    if (doesPixelFormatMatchFileSize(format, frameSize, fileSize))
+      return format;
+  }
+
   return {};
 }
 
