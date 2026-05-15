@@ -15,6 +15,10 @@ HEADERS += $$files(src/*.h, false)
 INCLUDEPATH += $$top_srcdir/YUViewLib/src
 LIBS += -L$$top_builddir/YUViewLib -lYUViewLib
 
+macx {
+    LIBS += -framework Metal -framework MetalKit -framework QuartzCore -framework Cocoa
+}
+
 win32-msvc* {
     PRE_TARGETDEPS += $$top_builddir/YUViewLib/YUViewLib.lib
 } else {

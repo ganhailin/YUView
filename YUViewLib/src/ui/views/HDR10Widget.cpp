@@ -35,12 +35,50 @@
 #include <video/yuv/videoHandlerYUV.h>
 
 #include <QDebug>
+#include <QMatrix3x3>
 #include <QSurfaceFormat>
 #include <QPainter>
 #include <QSettings>
 
+#ifdef Q_OS_MAC
+#include <ui/views/MacEDRUtil.h>
+#endif
+
 namespace video
 {
+
+// Gamut conversion matrices (source → Display P3, via XYZ intermediate)
+// BT.2020 → Display P3
+static const float BT2020_TO_P3[9] = {
+    1.343578f, -0.282180f, -0.061404f,
+   -0.065298f,  1.075788f, -0.010490f,
+    0.002822f, -0.019594f,  1.016915f
+};
+
+// BT.709 → Display P3
+static const float BT709_TO_P3[9] = {
+    0.822462f,  0.177536f, -0.000004f,
+    0.033194f,  0.966807f, -0.000000f,
+    0.017085f,  0.072414f,  0.910644f
+};
+
+// P3 → P3 (identity)
+static const float P3_TO_P3[9] = {
+    1.0f, 0.0f, 0.0f,
+    0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 1.0f
+};
+
+static const float *getGamutMatrix(HDR10_ColorGamut gamut)
+{
+  switch (gamut)
+  {
+    case HDR10_ColorGamut::BT2020: return BT2020_TO_P3;
+    case HDR10_ColorGamut::BT709:  return BT709_TO_P3;
+    case HDR10_ColorGamut::P3:     return P3_TO_P3;
+    default:                        return BT2020_TO_P3;
+  }
+}
 
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
@@ -55,9 +93,19 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
   format.setProfile(QSurfaceFormat::CoreProfile);
   format.setVersion(3, 3);
 
-#ifndef Q_OS_MAC
-  // 10-bit color buffers are not reliably supported on macOS
-  // Only request them on other platforms
+#ifdef Q_OS_MAC
+  // macOS EDR support: request extended color buffer range
+  // On macOS, we need at least 8-bit per channel with float capability for EDR
+  // The key is to use GL_RGBA16F as internal format, which allows values > 1.0
+  // 10-bit integer buffers on macOS OpenGL are unreliable, so we use 8-bit + EDR float
+  format.setRedBufferSize(8);
+  format.setGreenBufferSize(8);
+  format.setBlueBufferSize(8);
+  format.setAlphaBufferSize(8);
+  // Request float-type color buffer for extended range output
+  format.setColorSpace(QSurfaceFormat::sRGBColorSpace);  // Will be overridden by EDR shader
+#else
+  // 10-bit color buffers on non-macOS platforms
   format.setRedBufferSize(10);
   format.setGreenBufferSize(10);
   format.setBlueBufferSize(10);
@@ -74,12 +122,29 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
 
 HDR10Widget::~HDR10Widget()
 {
-  makeCurrent();
-  if (m_textureId != 0)
-    glDeleteTextures(1, &m_textureId);
-  delete m_program;
-  delete m_programDither;
-  doneCurrent();
+  // Safely clean up OpenGL resources. When the application is quitting,
+  // the parent SplitViewWidget is destroyed which deletes this widget via
+  // unique_ptr. At that point, the OpenGL context may already be invalid,
+  // causing makeCurrent() to crash. Check if the context is still usable.
+  auto *ctx = context();
+  if (ctx && ctx->isValid())
+  {
+    makeCurrent();
+    if (m_textureId != 0)
+      glDeleteTextures(1, &m_textureId);
+    delete m_program;
+    delete m_programDither;
+    delete m_programEDR;
+    doneCurrent();
+  }
+  else
+  {
+    // Context already gone - just null out the pointers
+    // (Qt will clean up the GL framebuffer objects internally)
+    m_program = nullptr;
+    m_programDither = nullptr;
+    m_programEDR = nullptr;
+  }
 }
 
 void HDR10Widget::setFrame(const VideoFrame &frame)
@@ -93,8 +158,6 @@ void HDR10Widget::setFrame(const VideoFrame &frame)
   auto old_size_empty = m_frameSize.isEmpty();
   if (newData != oldData || (new_size_empty != old_size_empty && (frame.getSize() != m_frameSize)))
   {
-    // qDebug() << "HDR10Widget::setFrame: newData=" << newData << ", oldData=" << oldData
-    //          << ", frameSize=" << frame.getSize() << ", currentFrameSize=" << m_frameSize;
     m_currentFrame = frame;
     if (!newData)
       m_currentFrame.clear16bitBuffer(); // Clear 16-bit buffer if new frame has no 16-bit data
@@ -139,10 +202,28 @@ void HDR10Widget::initializeGL()
   const char *renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
 
   // Check actual buffer bit depth
-  GLint redBits, greenBits, blueBits;
+  // Note: On macOS, QOpenGLWidget uses an internal FBO. The default framebuffer
+  // queries (GL_RED_BITS, etc.) may return garbage values if the FBO isn't properly
+  // bound yet. We need to bind our FBO first to get reliable results.
+  glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+
+  GLint redBits{8}, greenBits{8}, blueBits{8};
   glGetIntegerv(GL_RED_BITS, &redBits);
   glGetIntegerv(GL_GREEN_BITS, &greenBits);
   glGetIntegerv(GL_BLUE_BITS, &blueBits);
+
+  // Validate results - on macOS, these may return garbage if FBO wasn't bound
+  // If any value is negative or zero (except redBits which might be valid),
+  // treat the entire query as unreliable and fall back to safe defaults
+  if (greenBits < 0 || blueBits < 0 || greenBits == 0 && blueBits == 0)
+  {
+    qInfo() << "HDR10Widget: Framebuffer bit depth query returned unreliable values"
+            << "(" << redBits << "/" << greenBits << "/" << blueBits << "bits),"
+            << "assuming 8-bit default buffer";
+    redBits = 8;
+    greenBits = 8;
+    blueBits = 8;
+  }
 
   m_supports10bit = (redBits >= 10 && greenBits >= 10 && blueBits >= 10);
   if (!m_supports10bit)
@@ -152,8 +233,34 @@ void HDR10Widget::initializeGL()
     qInfo() << "HDR10Widget: 10-bit not supported, falling back to" << m_bitDepth << "bit ("
             << redBits << "/" << greenBits << "/" << blueBits << "bits)";
   }
+  else
+  {
+    qInfo() << "HDR10Widget: 10-bit supported (" << redBits << "/" << greenBits << "/" << blueBits << "bits)";
+  }
 
-  m_openglInfo = QString("OpenGL %1, Renderer: %2, %3-bit").arg(version, renderer).arg(m_bitDepth);
+#ifdef Q_OS_MAC
+  // Check macOS EDR support via Objective-C++ helper (avoid Cocoa headers in C++ files)
+  MacEDRInfo edrInfo = MacEDRUtil::queryEDRSupport();
+  m_edrSupported = edrInfo.edrSupported;
+  m_maxEDRValue = edrInfo.maxEDRValue;
+
+  if (m_edrSupported)
+  {
+    qInfo() << "HDR10Widget: macOS EDR supported, max EDR value:" << m_maxEDRValue;
+  }
+  else
+  {
+    qInfo() << "HDR10Widget: macOS EDR not available on current display (max EDR:" << m_maxEDRValue << ")";
+  }
+#endif
+
+  m_openglInfo = QString("OpenGL %1, Renderer: %2, %3-bit")
+                     .arg(version, renderer)
+                     .arg(m_bitDepth);
+#ifdef Q_OS_MAC
+  if (m_edrSupported)
+    m_openglInfo += QString(", EDR %1x").arg(m_maxEDRValue);
+#endif
 
   qInfo() << "HDR10Widget:" << m_openglInfo;
 
@@ -181,8 +288,12 @@ void HDR10Widget::initShaders()
   if (!m_programDither->link())
     qWarning() << "HDR10Widget: Dither shader link error:" << m_programDither->log();
 
-  m_textureLoc  = m_program->uniformLocation("texture16bit");
-  m_bitDepthLoc = m_program->uniformLocation("bitDepth");
+  // EDR shader for macOS: outputs float values > 1.0 to trigger EDR
+  m_programEDR = new QOpenGLShaderProgram(this);
+  m_programEDR->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
+  m_programEDR->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/hdr10_fragment_edr.glsl");
+  if (!m_programEDR->link())
+    qWarning() << "HDR10Widget: EDR shader link error:" << m_programEDR->log();
 }
 
 void HDR10Widget::initGeometry()
@@ -386,7 +497,42 @@ void HDR10Widget::paintGL()
   m_vbo.allocate(vertices, sizeof(vertices));
   m_vbo.release();
 
-  QOpenGLShaderProgram *currentProgram = m_ditheringEnabled ? m_programDither : m_program;
+  QOpenGLShaderProgram *currentProgram = nullptr;
+
+#ifdef Q_OS_MAC
+  // On macOS, QOpenGLWidget's internal FBO is always 8-bit RGBA (no float support).
+  // EDR output (>1.0 values) is NOT possible through QOpenGLWidget on macOS.
+  // EDR must be handled by the Metal-based HDR10WidgetMacEDR instead.
+  // Therefore, on macOS, HDR10Widget always uses the standard shader (0-1.0 range)
+  // and the MacEDR widget handles the EDR path.
+  //
+  // If MacEDR widget is not available (e.g. Metal initialization failed),
+  // the standard shader provides the best possible SDR rendering.
+  // The dither shader can still be used for improved 8-bit rendering.
+  if (m_ditheringEnabled)
+  {
+    currentProgram = m_programDither;
+  }
+  else
+  {
+    currentProgram = m_program;
+  }
+#else
+  // Non-macOS: Use EDR shader if available, or standard/dither based on settings
+  if (m_edrSupported && m_programEDR)
+  {
+    currentProgram = m_programEDR;
+  }
+  else if (m_ditheringEnabled)
+  {
+    currentProgram = m_programDither;
+  }
+  else
+  {
+    currentProgram = m_program;
+  }
+#endif
+
   currentProgram->bind();
   m_vao.bind();
 
@@ -394,9 +540,34 @@ void HDR10Widget::paintGL()
   glBindTexture(GL_TEXTURE_2D, m_textureId);
 
   glUniform1i(currentProgram->uniformLocation("texture16bit"), 0);
-  // Note: Both shaders now always normalize by 65535.0
-  // - Standard shader: direct normalization
-  // - Dithering shader: normalize then dither to 8-bit
+
+#ifndef Q_OS_MAC
+  // Set EDR shader uniforms (color processing pipeline) - only on non-macOS
+  // On macOS, EDR is handled by Metal-based HDR10WidgetMacEDR, not OpenGL shader
+  if (currentProgram == m_programEDR)
+  {
+    glUniform1i(currentProgram->uniformLocation("eotfType"), static_cast<int>(m_eotf));
+    glUniform1i(currentProgram->uniformLocation("sourceGamut"), static_cast<int>(m_colorGamut));
+    glUniform1f(currentProgram->uniformLocation("gammaValue"), m_gammaValue);
+    glUniform1f(currentProgram->uniformLocation("diffuseWhiteNits"), m_diffuseWhiteNits);
+    glUniform1f(currentProgram->uniformLocation("hdrBrightness"), m_hdrBrightness);
+
+    // Set gamut conversion matrix (3x3, column-major for OpenGL)
+    const float *matrixData = getGamutMatrix(m_colorGamut);
+    // OpenGL mat3 expects column-major order, but our matrix is row-major
+    // Need to transpose
+    QMatrix3x3 gamutMat;
+    for (int row = 0; row < 3; ++row)
+    {
+      for (int col = 0; col < 3; ++col)
+      {
+        // OpenGL mat3 column-major: data[col*3+row] = matrix[row*3+col]
+        gamutMat.data()[col * 3 + row] = matrixData[row * 3 + col];
+      }
+    }
+    glUniformMatrix3fv(currentProgram->uniformLocation("gamutMatrix"), 1, GL_FALSE, gamutMat.constData());
+  }
+#endif
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

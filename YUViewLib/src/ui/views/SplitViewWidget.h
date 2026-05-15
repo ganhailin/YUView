@@ -36,6 +36,11 @@
 #include <common/SaveUi.h>
 #include <common/Typedef.h>
 #include <ui/views/HDR10Widget.h>
+
+#ifdef Q_OS_MAC
+#include <ui/views/HDR10WidgetMacEDR.h>
+#endif
+
 #include <ui/views/MoveAndZoomableView.h>
 
 #include <QAction>
@@ -170,6 +175,8 @@ private slots:
   void toggleFullScreen(bool checked);
   void toggleHDRRendering(bool checked);
   void toggleHDRDithering(bool checked);
+  void toggleEDRMode(bool checked);
+  void showEDRSettings(bool checked = false);
 
 protected:
   // Set the widget to the given view mode
@@ -216,6 +223,8 @@ protected:
   QAction                       actionFullScreen;
   QAction                       actionHDRRendering;
   QAction                       actionHDRDithering;
+  QAction                       actionEDRMode;          // Toggle Metal EDR mode on macOS
+  QAction                       actionEDRSettings;      // Open EDR settings dialog on macOS
 
   void         updateMouseTracking();
   virtual bool updateMouseCursor(const QPoint &srcMousePos) override;
@@ -299,6 +308,25 @@ protected:
   // HDR rendering
   HDRRenderingMode                      hdrRenderingMode{HDRRenderingMode::Disabled};
   std::unique_ptr<video::HDR10Widget>   hdr10Widget;
+
+#ifdef Q_OS_MAC
+  // macOS EDR: Metal-based renderer widget (more reliable EDR than OpenGL on macOS)
+  std::unique_ptr<video::HDR10WidgetMacEDR> hdr10WidgetMacEDR;
+
+  // EDR control parameters
+  video::HDR10WidgetMacEDR::EOTF       m_edrEOTF{video::HDR10WidgetMacEDR::EOTF::SRGB};
+  video::HDR10WidgetMacEDR::ColorGamut m_edrColorGamut{video::HDR10WidgetMacEDR::ColorGamut::BT709};
+  float                                m_edrGamma{2.2f};
+  float                                m_edrDiffuseWhite{203.0f};
+  float                                m_edrBrightness{1.0f};
+#endif
+
+  // HDR EOTF/Gamut control (for OpenGL HDR10Widget EDR shader on macOS)
+  video::HDR10_EOTF       m_hdrEOTF{video::HDR10_EOTF::SRGB};
+  video::HDR10_ColorGamut m_hdrColorGamut{video::HDR10_ColorGamut::BT709};
+  float                   m_hdrGamma{2.2f};
+  float                   m_hdrDiffuseWhite{203.0f};
+  float                   m_hdrBrightness{1.0f};
 
   // Freezing of the view
   bool isViewFrozen{false}; //!< Is the view frozen?

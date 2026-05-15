@@ -1,0 +1,390 @@
+# YUView macOS EDR (Extended Dynamic Range) 设计与实现文档
+
+**版本:** 1.0  
+**日期:** 2026-05-15  
+**适用范围:** YUView macOS 平台 HDR/EDR 视频渲染功能
+
+---
+
+## 目录
+
+1. [概述](#1-概述)
+2. [架构设计](#2-架构设计)
+3. [组件详解](#3-组件详解)
+4. [数据流](#4-数据流)
+5. [EDR 设置系统](#5-edr-设置系统)
+6. [构建配置](#6-构建配置)
+7. [已知限制](#7-已知限制)
+8. [文件清单](#8-文件清单)
+
+---
+
+## 1. 概述
+
+### 1.1 什么是 EDR？
+
+EDR (Extended Dynamic Range) 是 macOS 的 HDR 显示技术。在支持 HDR 的 Mac 显示器上（如 MacBook Pro Liquid Retina XDR、Pro Display XDR），像素值超过 1.0（SDR 白色）的部分会被系统自动映射到显示器的 HDR 亮度范围。这使得 HDR 视频内容可以在 SDR 和 HDR 混合的桌面环境中正确呈现，无需切换全屏 HDR 模式。
+
+### 1.2 为什么需要 Metal 路径？
+
+Qt 的 `QOpenGLWidget` 使用内部 FBO (Framebuffer Object)，其颜色缓冲区格式由 Qt 控制。在 macOS 上，Qt 的 `QOpenGLWidget` 内部 FBO 始终是 8-bit RGBA 格式（`GL_RGBA8`），无法输出超过 1.0 的浮点值。因此，通过 `QOpenGLWidget` 的 OpenGL 渲染路径无法触发 EDR。
+
+Metal 的 `CAMetalLayer` 可以配置为 `RGBA16Float` 格式并设置 `wantsExtendedDynamicRangeContent = YES`，允许输出超过 1.0 的浮点值，从而正确触发 macOS EDR。
+
+### 1.3 双路径设计
+
+YUView 采用双路径渲染架构：
+
+| 路径 | 技术 | 适用场景 | EDR 能力 |
+|------|------|----------|----------|
+| **Metal EDR** | `HDR10WidgetMacEDR` + `MacEDRRenderer` | macOS HDR 显示 | ✅ 支持 EDR (>1.0) |
+| **OpenGL HDR** | `HDR10Widget` + `hdr10_fragment_edr.glsl` | 非 macOS / SDR fallback | ⚠️ macOS 不支持 EDR，其他平台依赖 GPU |
+
+---
+
+## 2. 架构设计
+
+### 2.1 类层次关系
+
+```
+splitViewWidget (SplitViewWidget.h/cpp)
+  ├── HDR10WidgetMacEDR (HDR10WidgetMacEDR.h/cpp)     [macOS Metal 路径]
+  │     ├── MacEDRRenderer (MacEDRRenderer.h/mm)       [Metal 渲染器]
+  │     │     ├── CAMetalLayer (Metal 渲染层)
+  │     │     ├── MTLRenderPipelineState (Metal 着色管线)
+  │     │     └── CALayer overlay (像素值/缩放叠加层)
+  │     └ MacEDRUtil (MacEDRUtil.h/mm)                [EDR 检测工具]
+  │
+  ├── HDR10Widget (HDR10Widget.h/cpp)                  [OpenGL 路径]
+  │     ├── hdr10_fragment.glsl                        [标准着色器]
+  │     ├── hdr10_fragment_dither.glsl                 [抖动着色器]
+  │     └ hdr10_fragment_edr.glsl                      [EDR 着色器 (非 macOS)]
+  │
+  └ EDRSettingsDialog (EDRSettingsDialog.h/cpp/ui)    [设置对话框]
+```
+
+### 2.2 组件职责
+
+| 组件 | 职责 |
+|------|------|
+| `splitViewWidget` | 中央协调器：管理 HDR/EDR 模式切换、菜单集成、设置持久化 |
+| `HDR10WidgetMacEDR` | macOS Metal EDR 渲染容器：嵌入 QWindow、转发事件、管理 overlay |
+| `MacEDRRenderer` | Metal 渲染核心：创建 Metal 设备/管线/纹理、执行 EDR 色彩处理 |
+| `MacEDRUtil` | EDR 检测：查询屏幕 EDR 支持能力和最大 EDR 值 |
+| `HDR10Widget` | OpenGL HDR 渲染：10-bit/16-bit 渲染、抖动、非 macOS EDR 着色器 |
+| `EDRSettingsDialog` | EDR 参数设置 UI：EOTF、色域、Gamma、漫射白、HDR 亮度 |
+
+---
+
+## 3. 组件详解
+
+### 3.1 MacEDRRenderer (Metal 渲染核心)
+
+**文件:** `MacEDRRenderer.h`, `MacEDRRenderer.mm`
+
+#### 关键配置
+
+```objc
+// CAMetalLayer EDR 配置
+metalLayer.wantsExtendedDynamicRangeContent = YES;
+metalLayer.colorspace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
+metalLayer.pixelFormat = MTLPixelFormatRGBA16Float;
+metalLayer.framebufferOnly = NO;  // 允许读取用于 overlay
+```
+
+#### EOTF 处理
+
+| EOTF 类型 | Metal 着色器实现 | 说明 |
+|-----------|-----------------|------|
+| PQ (ST 2084) | `pqEOTF()` | SMPTE ST 2084 Perceptual Quantizer |
+| HLG (ARIB STD-B67) | `hlgEOTF()` | ARIB STD-B67 Hybrid Log-Gamma |
+| Gamma | `pow(linear, 1/gamma)` | 纯幂函数 |
+| sRGB | `sRGBEOTF()` | IEC 61966-2-1 sRGB 近似 |
+
+#### 色域转换
+
+Metal 着色器内置 3×3 色域转换矩阵：
+
+| 源色域 | 转换目标 | 说明 |
+|--------|----------|------|
+| BT.2020 | Display P3 | 宽色域压缩到显示器色域 |
+| BT.709 | Display P3 | 色域扩展 |
+| DCI-P3 | Display P3 | 1:1 映射（无转换） |
+
+#### HDR 亮度处理
+
+```
+输出亮度 = EOTF(codeValue) × (hdrBrightness / diffuseWhiteNits) × maxEDR
+```
+
+- `diffuseWhiteNits`: SDR 白色参考值（默认 203 nits，PQ/HLG 标准）
+- `hdrBrightness`: 全局 HDR 亮度倍率（默认 1.0x）
+- `maxEDR`: 显示器最大 EDR 能力（由 `MacEDRUtil` 查询）
+
+#### CALayer Overlay
+
+像素值显示、缩放指示器和标尺通过 CALayer overlay 实现：
+
+```
+QImage → QPainter 绘制 → CGImage → CALayer.contents → 显示在 Metal 层之上
+```
+
+原因：Metal QWindow 是原生子窗口，macOS 窗口服务器将其合成在 Qt 的 backing store 之上。QPainter 在 `SplitViewWidget` 上绘制的内容在 EDR 模式下不可见。CALayer 作为 Metal layer 的 sublayer 叠加在渲染结果之上。
+
+#### 内存管理
+
+在 ARC `.mm` 文件中，Objective-C 对象存储为 `void*` 需要显式所有权管理：
+
+| 操作 | 桥接方式 | 说明 |
+|------|----------|------|
+| 存储 ObjC 对象 | `(__bridge_retained void*)` | 增加 CF 引用计数，C++ 拥有所有权 |
+| 释放 ObjC 对象 | `CFRelease()` | 减少 CF 引用计数，ARC 兼容 |
+| 读取 ObjC 对象 | `(__bridge id)` | 临时借用，不转移所有权 |
+| 释放+转移 | `(__bridge_transfer)` | RAII 式释放，ARC 接管 |
+
+### 3.2 HDR10WidgetMacEDR (Metal EDR 容器)
+
+**文件:** `HDR10WidgetMacEDR.h`, `HDR10WidgetMacEDR.cpp`
+
+#### 关键设计决策
+
+1. **不使用 `WA_NativeWindow` 创建 overlay widget**：额外的 NSView 会干扰 Metal QWindow 的 KVO 链，导致 "method signature argument cannot be nil" 崩溃。
+2. **使用 `CALayer` 替代 Qt Widget overlay**：避免 NSView 层级冲突。
+3. **延迟初始化 renderer**：Metal renderer 在首次 `paintEvent` 或 `showEvent` 时初始化，避免过早创建 Metal 资源。
+4. **事件转发**：Metal QWindow 的 NSView 会拦截鼠标事件。通过 `eventFilter` 将鼠标/滚轮/悬浮事件转发给父 `SplitViewWidget`。
+
+#### 初始化流程
+
+```
+构造函数: 创建 QWindow (MetalSurface), 设置容器窗口
+showEvent/paintEvent: → initializeRenderer()
+  → 创建 MacEDRRenderer
+  → 初始化 Metal 设备、管线
+  → 应用 EDR 设置 (EOTF/Gamut/Gamma/DiffuseWhite/Brightness)
+  → 创建 CALayer overlay
+```
+
+#### 退出安全
+
+析构函数中必须检查 OpenGL context 有效性：
+
+```cpp
+if (context() && context()->isValid()) {
+    makeCurrent();
+    glDeleteTextures(1, &m_textureId);
+    // ...
+} else {
+    // Context 已失效，Qt 内部清理
+    m_program = nullptr;
+    // ...
+}
+```
+
+### 3.3 HDR10Widget (OpenGL HDR 渲染)
+
+**文件:** `HDR10Widget.h`, `HDR10Widget.cpp`
+
+#### macOS 上的角色
+
+在 macOS 上，`HDR10Widget` 作为 SDR fallback 路径：
+- 当 EDR 模式关闭时使用 OpenGL 渲染
+- 当 Metal 路径不可用时作为备用
+- 不负责 EDR 输出（受 `QOpenGLWidget` FBO 8-bit 限制）
+
+#### 非 macOS 上的角色
+
+在其他平台上，`HDR10Widget` 可使用 `hdr10_fragment_edr.glsl` 进行 EDR 渲染：
+- 检测 GPU 是否支持浮点 FBO
+- 使用 EDR 着色器输出 >1.0 值
+- 支持 PQ/HLG/Gamma/sRGB EOTF 和色域转换
+
+### 3.4 MacEDRUtil (EDR 检测)
+
+**文件:** `MacEDRUtil.h`, `MacEDRUtil.mm`
+
+提供两个查询函数：
+
+| 函数 | 说明 |
+|------|------|
+| `queryEDRSupport()` | 查询主屏幕是否支持 EDR |
+| `queryEDRSupportForWindow(void*)` | 查询指定窗口所在屏幕的 EDR 能力 |
+
+返回结构：
+```cpp
+struct EDRSupportInfo {
+    bool supported;     // 是否支持 EDR
+    float maxEDRValue;  // 最大 EDR 倍率 (如 16.0 表示 16x SDR)
+};
+```
+
+---
+
+## 4. 数据流
+
+### 4.1 Metal EDR 渲染数据流
+
+```
+VideoFrame (16-bit YUV/RGB data)
+  → playlistItem::getFrame()
+  → splitViewWidget::paintEvent()
+    → HDR10WidgetMacEDR::setFrame(frame)
+      → MacEDRRenderer::loadFrame(data)   // 上传到 RGBA16Uint Metal 纹理
+      → MacEDRRenderer::render()           // Metal 着色器管线处理
+        → YUV→RGB 转换 (如需要)
+        → EOTF 转换 (PQ/HLG/Gamma/sRGB → 线性)
+        → 色域转换 (BT.2020/BT.709/P3 → Display P3)
+        → HDR 亮度缩放 (× brightness / diffuseWhite)
+        → 输出到 CAMetalLayer (RGBA16Float, 值 >1.0 触发 EDR)
+  → macOS 窗口服务器合成 EDR 内容到显示器
+```
+
+### 4.2 Overlay 数据流
+
+```
+像素值/缩放/标尺信息
+  → HDR10WidgetMacEDR::updatePixelOverlay()
+    → QPainter 在 QImage 上绘制文本和标尺
+    → MacEDRRenderer::setOverlayImage(qimage)
+      → QImage → CGImage 转换
+      → CALayer.contents = CGImage
+      → CALayer 显示在 Metal 层之上
+```
+
+### 4.3 设置持久化数据流
+
+```
+EDRSettingsDialog (UI)
+  → QSettings 读写:
+    View/EDR_EOTF          (int: 0=PQ, 1=HLG, 2=Gamma, 3=sRGB)
+    View/EDR_ColorGamut    (int: 0=BT2020, 1=BT709, 2=P3)
+    View/EDR_Gamma         (float: 1.0-3.0, 默认 2.2)
+    View/EDR_DiffuseWhite  (float: 100-10000, 默认 203.0 nits)
+    View/EDR_Brightness    (float: 0.1-16.0, 默认 1.0x)
+    View/HDRRendering      (bool: HDR 模式开关)
+    View/EDRMode           (bool: Metal/OpenGL 选择)
+```
+
+**关键时序**：EDR 设置必须在 `setHDRRenderingMode()` 之前加载，否则 widget 创建时会使用成员变量的默认值而非保存的值。
+
+---
+
+## 5. EDR 设置系统
+
+### 5.1 设置对话框
+
+**文件:** `EDRSettingsDialog.h`, `EDRSettingsDialog.cpp`, `edrSettingsDialog.ui`
+
+UI 结构（使用 QGridLayout + 分区标题 QLabel + 分隔线）：
+
+```
+┌─────────────────────────────────────────┐
+│ ** Color Processing **                  │ (粗体分区标题)
+│    EOTF:          [PQ (ST 2084)  ▼]     │
+│    Gamma:         [2.2 ▲▼]              │ (仅 EOTF=Gamma 时启用)
+│    Gamut:         [BT.2020     ▼]       │
+│ ─────────────────────────────           │ (分隔线)
+│ ** HDR Brightness **                    │ (粗体分区标题)
+│    Diffuse White: [203.0 ▲▼] nits       │
+│    HDR Brightness: [1.0 ▲▼] x           │
+│    EDR: supported, Max: 16x             │ (信息标签)
+│                                         │
+│              [OK]  [Cancel]              │
+└─────────────────────────────────────────┘
+```
+
+布局技术细节：
+- 使用 QGridLayout 替代 QFormLayout（避免标签和输入控件重叠）
+- `columnstretch="0,1"`：标签列固定宽度，输入列自动扩展
+- 标签右对齐 + `minimumSize 110×24`，防止被压缩
+- `horizontalSpacing=24`，标签和输入之间留出足够间距
+- 分区标题用 QLabel + bold 字体替代 QGroupBox title（QGroupBox title 在 macOS 上容易和内容重叠）
+
+### 5.2 设置应用流程
+
+```
+1. updateSettings(): 从 QSettings 加载 EDR 参数到成员变量
+2. setHDRRenderingMode(): 创建 widget 并用成员变量设置 EDR 参数
+3. initializeRenderer(): Metal renderer 初始化时应用 widget 的 EDR 参数
+4. showEDRSettings(): 用户修改 → 保存到 QSettings + 应用到 widget → renderer
+```
+
+---
+
+## 6. 构建配置
+
+### 6.1 YUViewLib.pro 添加
+
+```qmake
+macx {
+    SOURCES += src/ui/views/MacEDRRenderer.mm \
+               src/ui/views/MacEDRUtil.mm
+    HEADERS += src/ui/views/MacEDRRenderer.h \
+               src/ui/views/MacEDRUtil.h
+    LIBS += -framework Metal -framework MetalKit \
+            -framework QuartzCore -framework Cocoa
+}
+```
+
+### 6.2 YUViewApp.pro 添加
+
+```qmake
+macx {
+    LIBS += -framework Metal -framework MetalKit \
+            -framework QuartzCore -framework Cocoa
+}
+```
+
+### 6.3 shaders.qrc 添加
+
+```xml
+<file alias="shaders/hdr10_fragment_edr.glsl">shaders/hdr10_fragment_edr.glsl</file>
+```
+
+### 6.4 Objective-C++ 编译注意
+
+- `.mm` 文件在 ARC (Automatic Reference Counting) 下编译
+- ObjC 对象存储为 `void*` 时必须使用 `__bridge_retained`（增加引用计数）
+- 释放时使用 `CFRelease()`（ARC 兼容方式）
+- 初始化失败路径必须释放已 `__bridge_retained` 的对象，防止内存泄漏
+
+---
+
+## 7. 已知限制
+
+1. **QOpenGLWidget FBO 限制**：macOS 上 `QOpenGLWidget` 内部 FBO 为 8-bit RGBA，无法输出 >1.0 值。EDR 必须通过 Metal 路径实现。
+2. **CALayer overlay 性能**：每次 overlay 更新需要 QImage→QPainter→CGImage→CALayer 转换。对于频繁的像素值更新，可能产生性能开销。
+3. **Metal QWindow 事件隔离**：Metal QWindow 的 NSView 拦截鼠标事件，需要 eventFilter 转发给父 widget。
+4. **单屏 EDR 检测**：`MacEDRUtil` 默认查询主屏幕。多显示器场景下窗口可能在不同屏幕间移动。
+5. **浮点纹理精度**：Metal 着色器使用 `half` (float16) 精度，极高亮度值可能存在精度损失。
+6. **QSettings 默认值**：EOTF 默认为 sRGB (index=3)，Gamut 默认为 BT.709 (index=1)。用户首次使用需要手动设置 PQ/HLG 和 BT.2020 才能获得正确的 HDR 效果。
+
+---
+
+## 8. 文件清单
+
+### 新增文件
+
+| 文件 | 类型 | 行数 | 说明 |
+|------|------|------|------|
+| `YUViewLib/src/ui/views/MacEDRRenderer.h` | C++ 头文件 | ~167 | Metal 渲染器接口 |
+| `YUViewLib/src/ui/views/MacEDRRenderer.mm` | Objective-C++ | ~790 | Metal 渲染器实现 |
+| `YUViewLib/src/ui/views/MacEDRUtil.h` | C++ 头文件 | ~65 | EDR 检测接口 |
+| `YUViewLib/src/ui/views/MacEDRUtil.mm` | Objective-C++ | ~67 | EDR 检测实现 |
+| `YUViewLib/src/ui/views/HDR10WidgetMacEDR.h` | C++ 头文件 | ~168 | Metal EDR widget 接口 |
+| `YUViewLib/src/ui/views/HDR10WidgetMacEDR.cpp` | C++ 源文件 | ~649 | Metal EDR widget 实现 |
+| `YUViewLib/src/ui/EDRSettingsDialog.h` | C++ 头文件 | ~64 | EDR 设置对话框接口 |
+| `YUViewLib/src/ui/EDRSettingsDialog.cpp` | C++ 源文件 | ~102 | EDR 设置对话框实现 |
+| `YUViewLib/ui/edrSettingsDialog.ui` | Qt UI 文件 | ~374 | EDR 设置对话框 UI |
+| `YUViewLib/shaders/hdr10_fragment_edr.glsl` | GLSL 着色器 | ~133 | EDR OpenGL 着色器 |
+
+### 修改文件
+
+| 文件 | 改动量 | 说明 |
+|------|--------|------|
+| `YUViewLib/src/ui/views/SplitViewWidget.cpp` | +300 行 | EDR 模式管理、菜单、设置持久化 |
+| `YUViewLib/src/ui/views/SplitViewWidget.h` | +28 行 | EDR 成员变量、菜单 actions |
+| `YUViewLib/src/ui/views/HDR10Widget.cpp` | +180 行 | EDR 着色器、色域矩阵、macOS 适配 |
+| `YUViewLib/src/ui/views/HDR10Widget.h` | +50 行 | EDR 枚举、成员变量 |
+| `YUViewLib/YUViewLib.pro` | +7 行 | Metal 源文件、框架链接 |
+| `YUViewApp/YUViewApp.pro` | +4 行 | Metal 框架链接 |
+| `YUViewLib/shaders/shaders.qrc` | +1 行 | EDR 着色器资源 |

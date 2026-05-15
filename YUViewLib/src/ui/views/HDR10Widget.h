@@ -46,6 +46,34 @@ namespace video
 // Forward declaration
 class FrameHandler;
 
+/**
+ * @brief EOTF (Electro-Optical Transfer Function) 类型
+ *
+ * 用于将编码值转换为线性光输出。
+ * PQ 和 HLG 是 HDR 标准，Gamma 和 sRGB 是 SDR 标准。
+ * 在 macOS EDR 模式下，PQ/HLG 输出值可以超过 1.0，
+ * 系统自动映射到显示器 HDR 能力。
+ */
+enum class HDR10_EOTF
+{
+  PQ     = 0,  // SMPTE ST 2084 (Perceptual Quantizer) - HDR10/DolbyVision
+  HLG    = 1,  // ARIB STD-B67 (Hybrid Log-Gamma) - broadcast HDR
+  Gamma  = 2,  // Pure power-law gamma curve
+  SRGB   = 3   // IEC 61966-2-1 sRGB (piecewise)
+};
+
+/**
+ * @brief 色域类型
+ *
+ * HDR 内容通常使用 BT.2020 色域，需要转换到显示器的 Display P3 色域。
+ */
+enum class HDR10_ColorGamut
+{
+  BT2020 = 0,  // ITU-R BT.2020 - ultra-wide gamut for HDR
+  BT709  = 1,  // ITU-R BT.709 - standard HDTV gamut
+  P3     = 2   // DCI-P3 / Display P3 - wide gamut (Apple displays)
+};
+
 class HDR10Widget : public QOpenGLWidget, protected QOpenGLFunctions
 {
   Q_OBJECT
@@ -66,7 +94,18 @@ public:
     update();
     updatePixelOverlay();
   }
+
+  // EOTF and color gamut control (used in macOS EDR shader path)
+  void setEOTF(HDR10_EOTF eotf) { m_eotf = eotf; update(); }
+  void setColorGamut(HDR10_ColorGamut gamut) { m_colorGamut = gamut; update(); }
+  void setGammaValue(float gamma) { m_gammaValue = gamma; update(); }
+  void setDiffuseWhiteNits(float nits) { m_diffuseWhiteNits = nits; update(); }
+  void setHDRBrightness(float brightness) { m_hdrBrightness = brightness; update(); }
+
+  // EDR state query
   bool supports10bit() const { return m_supports10bit; }
+  bool isEDRSupported() const { return m_edrSupported; }
+  float getMaxEDRValue() const { return m_maxEDRValue; }
   QString getOpenGLInfo() const { return m_openglInfo; }
 
 protected:
@@ -115,8 +154,19 @@ private:
 
   QString m_openglInfo;
 
-  int m_textureLoc{-1};
-  int m_bitDepthLoc{-1};
+  // EDR and color processing parameters (used by EDR shader on macOS)
+  HDR10_EOTF       m_eotf{HDR10_EOTF::SRGB};
+  HDR10_ColorGamut m_colorGamut{HDR10_ColorGamut::BT709};
+  float            m_gammaValue{2.2f};
+  float            m_diffuseWhiteNits{203.0f};
+  float            m_hdrBrightness{1.0f};
+
+  // macOS EDR state
+  bool  m_edrSupported{false};
+  float m_maxEDRValue{1.0f};
+
+  // EDR shader program (macOS only - uses float output exceeding 1.0)
+  QOpenGLShaderProgram *m_programEDR{nullptr};
 
   double m_zoom{1.0};
   QPointF m_moveOffset{0, 0};

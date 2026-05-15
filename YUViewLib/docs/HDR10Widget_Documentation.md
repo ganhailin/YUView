@@ -4,6 +4,10 @@
 
 `HDR10Widget` 是 YUView 中用于 HDR（高动态范围）视频渲染的 OpenGL 控件。它继承自 `QOpenGLWidget`，支持 10-bit 或更高位深的视频渲染，提供了像素值显示、缩放平移、抖动处理等功能。
 
+在 macOS 上，EDR（Extended Dynamic Range）HDR 显示由 Metal 路径的 `HDR10WidgetMacEDR` 处理，`HDR10Widget` 作为 SDR fallback。在其他平台上，`HDR10Widget` 可通过 EDR 着色器输出 >1.0 浮点值（依赖 GPU 浮点 FBO 支持）。
+
+**详细 EDR 设计文档:** `docs/macOS_EDR_Design_and_Implementation.md`
+
 ## 目录
 
 1. [架构设计](#架构设计)
@@ -26,6 +30,23 @@ QOpenGLWidget
             └── HDR10Widget
 ```
 
+### 双路径 HDR/EDR 架构（macOS）
+
+```
+splitViewWidget
+    ├── HDR10WidgetMacEDR (Metal 路径)  ← macOS EDR 首选
+    │     ├── MacEDRRenderer (Metal 渲染核心)
+    │     │     ├── CAMetalLayer (EDR 输出层, RGBA16Float)
+    │     │     └── CALayer overlay (像素值/缩放叠加)
+    │     └ MacEDRUtil (EDR 检测)
+    │
+    └── HDR10Widget (OpenGL 路径)       ← SDR fallback / 非 macOS
+          ├── hdr10_fragment.glsl (标准渲染)
+          ├── hdr10_fragment_dither.glsl (抖动渲染)
+          ├── hdr10_fragment_edr.glsl (EDR 渲染, 非 macOS)
+          └ PixelOverlay (像素值叠加)
+```
+
 ### 内部组成
 
 ```
@@ -37,17 +58,23 @@ HDR10Widget (OpenGL 渲染层)
     │
     ├── OpenGL 着色器
     │       ├── 标准渲染 (hdr10_fragment.glsl)
-    │       └── 抖动渲染 (hdr10_fragment_dither.glsl)
+    │       ├── 抖动渲染 (hdr10_fragment_dither.glsl)
+    │       └── EDR 渲染 (hdr10_fragment_edr.glsl)  ← 非 macOS
     │
-    └── 外部依赖
-            ├── VideoFrame (帧数据)
-            └── FrameHandler (像素值查询)
+    └── EDR 色彩处理参数
+            ├── EOTF (PQ/HLG/Gamma/sRGB)
+            ├── ColorGamut (BT.2020/BT.709/P3)
+            ├── Gamma 值
+            ├── Diffuse White (nits)
+            └── HDR Brightness
 ```
 
 ### 渲染流程
 
 ```
 1. paintGL()              - OpenGL 渲染视频帧
+   ├── macOS: 使用标准/抖动着色器（EDR 由 Metal 路径处理）
+   └── 非 macOS: 若支持浮点 FBO，使用 EDR 着色器
 2. PixelOverlay::paintEvent()  - QPainter 绘制覆盖层
    ├── drawPixelValues() - 像素值显示
    ├── drawZoomIndicator() - 缩放倍率
@@ -122,6 +149,20 @@ private:
     bool m_supports10bit;
     QString m_openglInfo;
 
+    // EDR 色彩处理参数
+    HDR10_EOTF       m_eotf{HDR10_EOTF::SRGB};        // EOTF 类型
+    HDR10_ColorGamut m_colorGamut{HDR10_ColorGamut::BT709}; // 源色域
+    float            m_gammaValue{2.2f};              // Gamma 值
+    float            m_diffuseWhiteNits{203.0f};      // 漫射白 (nits)
+    float            m_hdrBrightness{1.0f};           // HDR 亮度倍率
+
+    // macOS EDR 状态
+    bool  m_edrSupported{false};   // EDR 支持状态
+    float m_maxEDRValue{1.0f};     // 最大 EDR 倍率
+
+    // EDR 着色器
+    QOpenGLShaderProgram *m_programEDR{nullptr};     // EDR 着色器
+
     // 视图控制
     double m_zoom;            // 缩放倍率
     QPointF m_moveOffset;     // 偏移量
@@ -138,6 +179,42 @@ private:
 ### PixelOverlay (内部类)
 
 透明 QWidget 覆盖层，用于在 OpenGL 渲染之上绘制像素值、标尺等 QPainter 内容。
+
+---
+
+## EDR 色彩处理枚举
+
+### HDR10_EOTF
+
+```cpp
+enum class HDR10_EOTF {
+    PQ   = 0,  // SMPTE ST 2084 Perceptual Quantizer
+    HLG  = 1,  // ARIB STD-B67 Hybrid Log-Gamma
+    Gamma = 2, // 纯幂函数
+    SRGB = 3   // IEC 61966-2-1 sRGB 近似
+};
+```
+
+### HDR10_ColorGamut
+
+```cpp
+enum class HDR10_ColorGamut {
+    BT2020 = 0, // ITU-R BT.2020 宽色域
+    BT709  = 1, // ITU-R BT.709 标准色域
+    P3     = 2  // DCI-P3 色域
+};
+```
+
+### EDR 着色器色彩处理管线
+
+EDR 着色器 (`hdr10_fragment_edr.glsl`) 实现完整的 HDR 色彩处理：
+
+1. **EOTF 转换**: 将编码值映射到线性光
+2. **色域转换**: 3×3 矩阵将源色域映射到目标色域
+3. **HDR 亮度缩放**: `output = linear × (hdrBrightness / diffuseWhiteNits)`
+4. **输出 >1.0 值**: 在支持浮点 FBO 的 GPU 上触发 HDR/EDR 显示
+
+**macOS 注意**: `QOpenGLWidget` 内部 FBO 为 8-bit RGBA，无法输出 >1.0 值。EDR 由 Metal 路径处理。
 
 ---
 
@@ -264,6 +341,72 @@ private:
 - `show` - true 显示像素值
 
 **条件**：仅在缩放 >= 4.0 时实际显示
+
+---
+
+### EDR/HDR 接口
+
+#### `void setEOTF(HDR10_EOTF eotf)`
+
+**功能**：设置 EOTF (Electro-Optical Transfer Function) 类型
+
+**参数**：PQ, HLG, Gamma, SRGB
+
+**影响**：EDR 着色器的 EOTF 转换
+
+---
+
+#### `void setColorGamut(HDR10_ColorGamut gamut)`
+
+**功能**：设置源色域
+
+**参数**：BT.2020, BT.709, DCI-P3
+
+**影响**：EDR 着色器的色域转换矩阵
+
+---
+
+#### `void setGammaValue(float gamma)`
+
+**功能**：设置 Gamma 值（仅 EOTF=Gamma 时使用）
+
+**参数**：1.0-3.0，默认 2.2
+
+---
+
+#### `void setDiffuseWhiteNits(float nits)`
+
+**功能**：设置漫射白参考亮度
+
+**参数**：100-10000 nits，默认 203.0
+
+**用途**：HDR 亮度缩放的参考点
+
+---
+
+#### `void setHDRBrightness(float brightness)`
+
+**功能**：设置全局 HDR 亮度倍率
+
+**参数**：0.1-16.0x，默认 1.0
+
+**影响**：值 >1.0 触发 EDR/HDR 输出
+
+---
+
+#### `bool isEDRSupported() const`
+
+**功能**：查询当前 GPU/显示是否支持 EDR
+
+**macOS**: 通过 `MacEDRUtil` 检测屏幕 EDR 能力
+
+---
+
+#### `float getMaxEDRValue() const`
+
+**功能**：查询最大 EDR 倍率
+
+**返回**：如 16.0 表示 16x SDR 白色
 
 ---
 
@@ -397,9 +540,10 @@ paintGL()
     │       └── glTexImage2D(GL_RGBA16UI, ...)
     ├── 计算顶点坐标 (应用 zoom/offset)
     └── 渲染
-            ├── 选择着色器 (标准/抖动)
+            ├── macOS: 选择着色器 (标准/抖动) ← EDR 由 Metal 路径处理
+            ├── 非 macOS + EDR 支持: 选择着色器 (标准/抖动/EDR)
             ├── 绑定纹理
-            ├── 设置 uniform (texture16bit, bitDepth)
+            ├── 设置 uniform (texture16bit, bitDepth, eotf, colorGamut, ...)
             └── glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 ```
 
@@ -691,6 +835,49 @@ A: 避免在缩放不够大时显示过多数字造成视觉混乱。32x 放大�
 
 A: 设置 `setBitDepth(12)`，渲染管线会自动适应。注意需要 OpenGL 和显示器支持。
 
+### Q: macOS 上为什么不使用 HDR10Widget 的 EDR 路径？
+
+A: macOS 上 `QOpenGLWidget` 的内部 FBO 始终为 8-bit RGBA，即使 GL 着色器输出 >1.0 的浮点值，写入 FBO 时也会被截断到 0-1 范围。因此 macOS 的 EDR 必须通过 Metal 路径 (`HDR10WidgetMacEDR` + `MacEDRRenderer`) 实现，使用 `CAMetalLayer` 的 `RGBA16Float` 格式输出 >1.0 值。
+
+### Q: EDR 模式下像素值叠加层如何工作？
+
+A: macOS EDR 模式下，Metal QWindow 是由 macOS 窗口服务器直接合成在 Qt backing store 上方的原生子窗口。`SplitViewWidget` 的 QPainter 绘制内容在 EDR 模式下不可见。解决方案是在 Metal 层的 NSView 上添加一个原生 CALayer 作为叠加层，用于显示像素值、缩放指示器等内容。
+
+---
+
+## macOS EDR 路径补充
+
+### HDR10WidgetMacEDR
+
+`HDR10WidgetMacEDR` 是 macOS 上 EDR HDR 渲染的入口组件，负责：
+
+1. **EDR 检测**: 通过 `MacEDRUtil` 检测屏幕 EDR 能力
+2. **Metal 渲染器创建**: 创建 `MacEDRRenderer` 实例
+3. **EDR 参数配置**: 传递 EOTF、色域、亮度等参数到 Metal 渲染器
+4. **CALayer 叠加**: 在 Metal 层上添加原生 CALayer 用于像素值显示
+
+### MacEDRRenderer
+
+`MacEDRRenderer` 是 Metal 渲染核心，负责：
+
+1. **CAMetalLayer 创建**: 使用 `RGBA16Float` 格式，支持 >1.0 值输出
+2. **Metal 渲染管线**: 创建 MTLRenderPipelineState 进行 HDR 帧渲染
+3. **EDR 触发**: 设置 `CAMetalLayer.wantsExtendedDynamicRangeContent = YES`
+4. **色彩空间**: 根据设置配置 `CAMetalLayer.colorspace`（BT.2020/P3/sRGB）
+5. **ARC 内存管理**: 使用 `__bridge_retained` / `CFRelease()` 管理 Core Foundation 对象
+
+### EDR 设置对话框
+
+EDR 设置通过 `edrSettingsDialog.ui` 配置，包含：
+
+- **EOTF 选择**: PQ / HLG / Gamma / sRGB
+- **色域选择**: BT.2020 / BT.709 / DCI-P3
+- **Gamma 值**: 1.0 - 3.0
+- **漫射白**: 100 - 10000 nits
+- **HDR 亮度**: 0.1 - 16.0x
+
+设置通过 QSettings 持久化存储。
+
 ---
 
 ## 文件位置
@@ -702,11 +889,17 @@ A: 设置 `setBitDepth(12)`，渲染管线会自动适应。注意需要 OpenGL 
 | 顶点着色器 | `YUViewLib/shaders/hdr10_vertex.glsl` |
 | 标准片段着色器 | `YUViewLib/shaders/hdr10_fragment.glsl` |
 | 抖动片段着色器 | `YUViewLib/shaders/hdr10_fragment_dither.glsl` |
+| EDR 片段着色器 | `YUViewLib/shaders/hdr10_fragment_edr.glsl` |
+| EDR 设置对话框 | `YUViewLib/ui/edrSettingsDialog.ui` |
+| macOS EDR Widget | `YUViewLib/src/ui/views/HDR10WidgetMacEDR.h/cpp` |
+| Metal 渲染器 | `YUViewLib/src/ui/views/MacEDRRenderer.h/mm` |
+| EDR 工具类 | `YUViewLib/src/ui/views/MacEDRUtil.h/mm` |
+| EDR 设计文档 | `docs/macOS_EDR_Design_and_Implementation.md` |
 
 ---
 
 ## 作者和维护
 
 - **作者**: YUView 开发团队
-- **最近修改**: 2025-05-08
-- **功能增强**: 添加像素值显示、标尺、缩放指示器、抖动控制
+- **最近修改**: 2025-06
+- **功能增强**: 添加像素值显示、标尺、缩放指示器、抖动控制、macOS EDR 支持

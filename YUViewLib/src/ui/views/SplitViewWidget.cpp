@@ -38,6 +38,10 @@
 #include <video/FrameHandler.h>
 #include <video/caching/VideoCache.h>
 
+#ifdef Q_OS_MAC
+#include <ui/EDRSettingsDialog.h>
+#endif
+
 #include <QActionGroup>
 #include <QBackingStore>
 #include <QDockWidget>
@@ -148,6 +152,17 @@ void splitViewWidget::updateSettings()
   zoomBoxBackgroundColor     = settings.value(paletteBackgroundColorSettingsTag).value<QColor>();
   drawItemPathAndNameEnabled = settings.value("ShowFilePathInSplitMode", true).toBool();
 
+#ifdef Q_OS_MAC
+  // Load EDR settings from QSettings BEFORE creating/showing HDR widgets,
+  // so that the saved values are in member variables when setHDRRenderingMode
+  // creates the MacEDR widget and applies settings to it.
+  m_edrEOTF = static_cast<video::HDR10WidgetMacEDR::EOTF>(settings.value("View/EDR_EOTF", 3).toInt());
+  m_edrColorGamut = static_cast<video::HDR10WidgetMacEDR::ColorGamut>(settings.value("View/EDR_ColorGamut", 1).toInt());
+  m_edrGamma = settings.value("View/EDR_Gamma", 2.2f).toFloat();
+  m_edrDiffuseWhite = settings.value("View/EDR_DiffuseWhite", 203.0f).toFloat();
+  m_edrBrightness = settings.value("View/EDR_Brightness", 1.0f).toFloat();
+#endif
+
   // Load HDR rendering mode from settings
   bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
   setHDRRenderingMode(hdrEnabled ? HDRRenderingMode::Enabled : HDRRenderingMode::Disabled, false);
@@ -165,31 +180,86 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
 
   if (mode == HDRRenderingMode::Enabled)
   {
-    // Create HDR10Widget if it doesn't exist
+#ifdef Q_OS_MAC
+    // macOS: Create MacEDR widget (Metal-based) for reliable EDR support
+    // The MacEDR widget initializes its Metal renderer lazily (on first show/paint).
+    // We always create it and show it when HDR is enabled on macOS.
+    if (!hdr10WidgetMacEDR)
+    {
+      hdr10WidgetMacEDR = std::make_unique<video::HDR10WidgetMacEDR>(this);
+      hdr10WidgetMacEDR->setParent(this);
+      hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
+      hdr10WidgetMacEDR->setZoom(this->zoomFactor);
+      hdr10WidgetMacEDR->setMoveOffset(this->moveOffset);
+
+      // Apply EDR color processing settings
+      hdr10WidgetMacEDR->setEOTF(m_edrEOTF);
+      hdr10WidgetMacEDR->setColorGamut(m_edrColorGamut);
+      hdr10WidgetMacEDR->setGammaValue(m_edrGamma);
+      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_edrDiffuseWhite);
+      hdr10WidgetMacEDR->setHDRBrightness(m_edrBrightness);
+    }
+
+    // Show MacEDR widget by default on macOS (Metal is the preferred EDR path)
+    // Check EDR mode preference from settings
+    QSettings edrSettings;
+    bool useMacEDR = edrSettings.value("View/EDRMode", true).toBool();
+
+    if (useMacEDR)
+    {
+      hdr10WidgetMacEDR->show();
+      hdr10WidgetMacEDR->raise();
+    }
+#endif
+
+    // Also create OpenGL HDR10Widget as fallback (always needed for SDR path)
     if (!hdr10Widget)
     {
       hdr10Widget = std::make_unique<video::HDR10Widget>(this);
       hdr10Widget->setParent(this);
-      // Position the HDR widget to cover the entire widget area
-      // It will be raised below the QPainter overlays
       hdr10Widget->setGeometry(0, 0, width(), height());
       hdr10Widget->raise();
 
-      // Initialize zoom and offset
       hdr10Widget->setZoom(this->zoomFactor);
       hdr10Widget->setMoveOffset(this->moveOffset);
 
-      // Apply saved dithering setting
+      // Apply HDR color processing settings (for EDR shader - used on non-macOS only)
+      hdr10Widget->setEOTF(m_hdrEOTF);
+      hdr10Widget->setColorGamut(m_hdrColorGamut);
+      hdr10Widget->setGammaValue(m_hdrGamma);
+      hdr10Widget->setDiffuseWhiteNits(m_hdrDiffuseWhite);
+      hdr10Widget->setHDRBrightness(m_hdrBrightness);
+
       QSettings ditherSettings;
       bool ditheringEnabled = ditherSettings.value("View/HDRDithering", false).toBool();
       hdr10Widget->setDithering(ditheringEnabled);
       actionHDRDithering.setChecked(ditheringEnabled);
     }
+
+#ifdef Q_OS_MAC
+    // On macOS: if MacEDR is preferred and active, hide the OpenGL widget
+    // (MacEDR handles EDR; OpenGL widget is just a fallback)
+    if (useMacEDR && hdr10WidgetMacEDR)
+    {
+      hdr10Widget->hide();
+    }
+    else
+    {
+      // Mac EDR not available, show OpenGL widget instead
+      hdr10Widget->show();
+      if (hdr10WidgetMacEDR)
+        hdr10WidgetMacEDR->hide();
+    }
+#else
     hdr10Widget->show();
+#endif
   }
   else
   {
-    // Hide HDR10Widget
+#ifdef Q_OS_MAC
+    if (hdr10WidgetMacEDR)
+      hdr10WidgetMacEDR->hide();
+#endif
     if (hdr10Widget)
       hdr10Widget->hide();
   }
@@ -200,6 +270,13 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
 
 bool splitViewWidget::isHDRSupported() const
 {
+#ifdef Q_OS_MAC
+  // On macOS, EDR is supported via Metal widget or OpenGL EDR shader
+  if (hdr10WidgetMacEDR && hdr10WidgetMacEDR->isEDRSupported())
+    return true;
+  if (hdr10Widget && hdr10Widget->isEDRSupported())
+    return true;
+#endif
   // HDR is supported if we have an HDR10Widget and it supports 10-bit output
   return hdr10Widget && hdr10Widget->supports10bit();
 }
@@ -207,9 +284,13 @@ bool splitViewWidget::isHDRSupported() const
 void splitViewWidget::resizeEvent(QResizeEvent *event)
 {
   MoveAndZoomableView::resizeEvent(event);
-  // Update HDR10Widget geometry when SplitView is resized
+  // Update HDR widget geometry when SplitView is resized
   if (hdr10Widget && hdr10Widget->isVisible())
     hdr10Widget->setGeometry(0, 0, width(), height());
+#ifdef Q_OS_MAC
+  if (hdr10WidgetMacEDR && hdr10WidgetMacEDR->isVisible())
+    hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
+#endif
 }
 
 void splitViewWidget::paintEvent(QPaintEvent *)
@@ -463,8 +544,33 @@ void splitViewWidget::paintEvent(QPaintEvent *)
     {
       centerPoints[0] = drawArea_botR / 2;
 
-      // HDR rendering: Use HDR10Widget if enabled
-      if (hdrRenderingMode == HDRRenderingMode::Enabled && hdr10Widget && !waitingForCaching)
+      // HDR rendering: Use HDR10Widget or MacEDR widget if enabled
+      bool useMacEDRWidget = false;
+
+#ifdef Q_OS_MAC
+      // macOS: Check if user wants Metal EDR mode
+      QSettings edrSettings;
+      bool edrModePref = edrSettings.value("View/EDRMode", true).toBool();
+
+      // macOS: use MacEDR widget (Metal-based) for EDR when EDR mode is enabled
+      if (hdrRenderingMode == HDRRenderingMode::Enabled && edrModePref && hdr10WidgetMacEDR && !waitingForCaching)
+      {
+        // Position MacEDR widget to cover the drawing area
+        hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
+
+        if (auto frameHandler = item[0]->getFrameHandler())
+        {
+          video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
+          hdr10WidgetMacEDR->setFrame(videoFrame);
+          hdr10WidgetMacEDR->setFrameHandler(frameHandler);
+        }
+
+        hdr10WidgetMacEDR->setShowRawData(drawRawValues);
+        useMacEDRWidget = true;
+      }
+#endif
+
+      if (!useMacEDRWidget && hdrRenderingMode == HDRRenderingMode::Enabled && hdr10Widget && !waitingForCaching)
       {
         // Position HDR10Widget to cover the drawing area
         hdr10Widget->setGeometry(0, 0, width(), height());
@@ -480,7 +586,7 @@ void splitViewWidget::paintEvent(QPaintEvent *)
         // Sync pixel value display settings
         hdr10Widget->setShowRawData(drawRawValues);
       }
-      else
+      else if (!useMacEDRWidget)
       {
         // Hide HDR10Widget when not in HDR mode
         if (hdr10Widget)
@@ -491,8 +597,12 @@ void splitViewWidget::paintEvent(QPaintEvent *)
       painter.translate(centerPoints[0] + offset);
 
       // Draw the item at position (0,0) - only if not using HDR rendering
-      // (HDR10Widget already rendered the frame)
-      if (!waitingForCaching && hdrRenderingMode != HDRRenderingMode::Enabled)
+      // (HDR10Widget or MacEDR widget already rendered the frame)
+      bool hdrActive = (hdrRenderingMode == HDRRenderingMode::Enabled);
+#ifdef Q_OS_MAC
+      hdrActive = hdrActive && (useMacEDRWidget || hdr10Widget);
+#endif
+      if (!waitingForCaching && !hdrActive)
       {
         painter.setFont(
             QFont(SPLITVIEWWIDGET_PIXEL_VALUES_FONT, SPLITVIEWWIDGET_PIXEL_VALUES_FONTSIZE));
@@ -1140,9 +1250,13 @@ void splitViewWidget::setMoveOffset(QPointF offset)
 {
   MoveAndZoomableView::setMoveOffset(offset);
 
-  // Update HDR10Widget with new offset
+  // Update HDR widget with new offset
   if (hdr10Widget)
     hdr10Widget->setMoveOffset(offset);
+#ifdef Q_OS_MAC
+  if (hdr10WidgetMacEDR)
+    hdr10WidgetMacEDR->setMoveOffset(offset);
+#endif
 
   if (this->isMasterView)
   {
@@ -1210,9 +1324,13 @@ void splitViewWidget::setZoomFactor(double zoom)
 {
   MoveAndZoomableView::setZoomFactor(zoom);
 
-  // Update HDR10Widget with new zoom
+  // Update HDR widget with new zoom
   if (hdr10Widget)
     hdr10Widget->setZoom(zoom);
+#ifdef Q_OS_MAC
+  if (hdr10WidgetMacEDR)
+    hdr10WidgetMacEDR->setZoom(zoom);
+#endif
 
   if (this->isMasterView)
   {
@@ -1335,6 +1453,10 @@ void splitViewWidget::toggleHDRRendering(bool checked)
 
   // Enable/disable dithering action based on HDR mode
   actionHDRDithering.setEnabled(checked);
+#ifdef Q_OS_MAC
+  actionEDRMode.setEnabled(checked);
+  actionEDRSettings.setEnabled(checked);
+#endif
 
   // Save the setting
   QSettings settings;
@@ -1346,9 +1468,87 @@ void splitViewWidget::toggleHDRDithering(bool checked)
   if (hdr10Widget)
     hdr10Widget->setDithering(checked);
 
+#ifdef Q_OS_MAC
+  // Dithering not needed with EDR (display shows full range)
+  // But still apply to OpenGL fallback
+#endif
+
   // Save the setting
   QSettings settings;
   settings.setValue("View/HDRDithering", checked);
+}
+
+void splitViewWidget::toggleEDRMode(bool checked)
+{
+#ifdef Q_OS_MAC
+  if (checked && hdr10WidgetMacEDR)
+  {
+    // Use Metal EDR widget (preferred on macOS for EDR)
+    hdr10WidgetMacEDR->show();
+    hdr10WidgetMacEDR->raise();
+    if (hdr10Widget)
+      hdr10Widget->hide();
+  }
+  else
+  {
+    // Use OpenGL HDR10Widget (fallback, may still use EDR shader)
+    if (hdr10Widget)
+      hdr10Widget->show();
+    if (hdr10WidgetMacEDR)
+      hdr10WidgetMacEDR->hide();
+  }
+
+  // Save EDR mode preference
+  QSettings settings;
+  settings.setValue("View/EDRMode", checked);
+#else
+  Q_UNUSED(checked)
+#endif
+
+  update();
+}
+
+void splitViewWidget::showEDRSettings(bool)
+{
+#ifdef Q_OS_MAC
+  EDRSettingsDialog dialog(this);
+
+  // Set EDR info in dialog
+  if (hdr10WidgetMacEDR)
+    dialog.setEDRInfo(hdr10WidgetMacEDR->isEDRSupported(), hdr10WidgetMacEDR->getMaxEDRValue());
+  else
+    dialog.setEDRInfo(false, 1.0f);
+
+  if (dialog.exec() == QDialog::Accepted)
+  {
+    // Get values from dialog
+    m_edrEOTF = dialog.eotf();
+    m_edrColorGamut = dialog.colorGamut();
+    m_edrGamma = dialog.gammaValue();
+    m_edrDiffuseWhite = dialog.diffuseWhiteNits();
+    m_edrBrightness = dialog.hdrBrightness();
+
+    // Save to QSettings
+    QSettings settings;
+    settings.setValue("View/EDR_EOTF", static_cast<int>(m_edrEOTF));
+    settings.setValue("View/EDR_ColorGamut", static_cast<int>(m_edrColorGamut));
+    settings.setValue("View/EDR_Gamma", m_edrGamma);
+    settings.setValue("View/EDR_DiffuseWhite", m_edrDiffuseWhite);
+    settings.setValue("View/EDR_Brightness", m_edrBrightness);
+
+    // Apply to MacEDR widget immediately
+    if (hdr10WidgetMacEDR)
+    {
+      hdr10WidgetMacEDR->setEOTF(m_edrEOTF);
+      hdr10WidgetMacEDR->setColorGamut(m_edrColorGamut);
+      hdr10WidgetMacEDR->setGammaValue(m_edrGamma);
+      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_edrDiffuseWhite);
+      hdr10WidgetMacEDR->setHDRBrightness(m_edrBrightness);
+    }
+  }
+#else
+  // No-op on non-macOS
+#endif
 }
 
 void splitViewWidget::resetViewInternal()
@@ -1522,15 +1722,41 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
 
   if (!item1 && !item2)
   {
-    // Hide HDR10Widget when no items are selected
+    // Hide HDR widgets when no items are selected
     if (hdr10Widget)
       hdr10Widget->hide();
+#ifdef Q_OS_MAC
+    if (hdr10WidgetMacEDR)
+      hdr10WidgetMacEDR->hide();
+#endif
     return;
   }
 
-  // Show HDR10Widget if HDR rendering is enabled (paintEvent will handle the rest)
-  if (hdr10Widget && hdrRenderingMode == HDRRenderingMode::Enabled)
-    hdr10Widget->show();
+  // Show HDR widgets if HDR rendering is enabled (paintEvent will handle the rest)
+  if (hdrRenderingMode == HDRRenderingMode::Enabled)
+  {
+#ifdef Q_OS_MAC
+    QSettings edrSettings;
+    bool useMacEDR = edrSettings.value("View/EDRMode", true).toBool();
+
+    if (useMacEDR && hdr10WidgetMacEDR)
+    {
+      hdr10WidgetMacEDR->show();
+      if (hdr10Widget)
+        hdr10Widget->hide();
+    }
+    else
+    {
+      if (hdr10Widget)
+        hdr10Widget->show();
+      if (hdr10WidgetMacEDR)
+        hdr10WidgetMacEDR->hide();
+    }
+#else
+    if (hdr10Widget)
+      hdr10Widget->show();
+#endif
+  }
 
   QSettings settings;
   bool savePositionAndZoomPerItem = settings.value("SavePositionAndZoomPerItem", false).toBool();
@@ -1893,8 +2119,15 @@ void splitViewWidget::createMenuActions()
                   Checkable(true),
                   Checkable(this->hdrRenderingMode == HDRRenderingMode::Enabled),
                   &splitViewWidget::toggleHDRRendering);
+#ifdef Q_OS_MAC
+  actionHDRRendering.setToolTip("Enable HDR rendering with macOS EDR support. "
+                                "On HDR-capable Mac displays, values above SDR white "
+                                "(1.0) are automatically mapped to the display's HDR range "
+                                "via Extended Dynamic Range (EDR).");
+#else
   actionHDRRendering.setToolTip("Enable HDR 10-bit rendering using OpenGL. Requires a 10-bit "
                                 "capable display and GPU for true 10-bit output.");
+#endif
 
   // HDR dithering action
   configureAction(this->actionHDRDithering,
@@ -1906,6 +2139,31 @@ void splitViewWidget::createMenuActions()
   actionHDRDithering.setToolTip("Enable Bayer dithering for HDR rendering to reduce banding on "
                                 "8-bit displays.");
   actionHDRDithering.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
+
+#ifdef Q_OS_MAC
+  // EDR mode action (macOS only: toggle between Metal EDR and OpenGL rendering)
+  configureAction(this->actionEDRMode,
+                  nullptr,
+                  "EDR (Metal Renderer)",
+                  Checkable(true),
+                  Checked(QSettings().value("View/EDRMode", true).toBool()),
+                  &splitViewWidget::toggleEDRMode);
+  actionEDRMode.setToolTip("Use macOS Metal renderer for EDR display. "
+                           "When enabled, uses CAMetalLayer with Extended Linear Display P3 "
+                           "color space for reliable HDR output on Mac displays.");
+  actionEDRMode.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
+
+  // EDR settings dialog action (macOS only)
+  configureAction(this->actionEDRSettings,
+                  nullptr,
+                  "EDR Settings...",
+                  Checkable(false),
+                  Checked(false),
+                  &splitViewWidget::showEDRSettings);
+  actionEDRSettings.setToolTip("Configure EDR color processing parameters: EOTF, color gamut, "
+                               "diffuse white, and HDR brightness.");
+  actionEDRSettings.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
+#endif
 
   if (this->isMasterView)
   {
@@ -2137,6 +2395,10 @@ void splitViewWidget::addMenuActions(QMenu *menu)
   menu->addAction(&actionZoomBox);
   menu->addAction(&actionHDRRendering);
   menu->addAction(&actionHDRDithering);
+#ifdef Q_OS_MAC
+  menu->addAction(&actionEDRMode);
+  menu->addAction(&actionEDRSettings);
+#endif
 
   auto separateViewMenu = menu->addMenu("Separate View");
   separateViewMenu->addAction(!isMasterView ? &this->getOtherWidget()->actionSeparateView

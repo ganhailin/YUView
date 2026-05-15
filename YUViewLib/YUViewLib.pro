@@ -13,6 +13,13 @@ CONFIG += object_parallel_to_source
 SOURCES += $$files(src/*.cpp, true)
 HEADERS += $$files(src/*.h, true)
 
+# macOS: include Objective-C++ Metal renderer source
+macx {
+    SOURCES += src/ui/views/MacEDRRenderer.mm \
+               src/ui/views/MacEDRUtil.mm
+    LIBS += -framework Metal -framework MetalKit -framework QuartzCore -framework Cocoa
+}
+
 FORMS += $$files(ui/*.ui, false)
 
 INCLUDEPATH += src/

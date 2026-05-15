@@ -3,5 +3,6 @@
         <file>hdr10_vertex.glsl</file>
         <file>hdr10_fragment.glsl</file>
         <file>hdr10_fragment_dither.glsl</file>
+        <file>hdr10_fragment_edr.glsl</file>
     </qresource>
 </RCC>
