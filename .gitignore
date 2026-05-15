@@ -6,8 +6,11 @@ YUView.pro.user
 *.VC.db
 *.sln
 *.vcxproj*
+/.qwen
+/.claude
 /.vs
 /build
+/build-debug
 /buildRelease
 /GeneratedFiles
 /x64
