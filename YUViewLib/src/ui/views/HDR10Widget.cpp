@@ -35,6 +35,7 @@
 #include <video/yuv/videoHandlerYUV.h>
 
 #include <QDebug>
+#include <QMatrix3x3>
 #include <QSurfaceFormat>
 #include <QPainter>
 #include <QSettings>
@@ -42,6 +43,39 @@
 
 namespace video
 {
+
+// Gamut conversion matrices (source → Display P3, via XYZ intermediate)
+// BT.2020 → Display P3
+static const float BT2020_TO_P3[9] = {
+    1.343578f, -0.282180f, -0.061404f,
+   -0.065298f,  1.075788f, -0.010490f,
+    0.002822f, -0.019594f,  1.016915f
+};
+
+// BT.709 → Display P3
+static const float BT709_TO_P3[9] = {
+    0.822462f,  0.177536f, -0.000004f,
+    0.033194f,  0.966807f, -0.000000f,
+    0.017085f,  0.072414f,  0.910644f
+};
+
+// P3 → P3 (identity)
+static const float P3_TO_P3[9] = {
+    1.0f, 0.0f, 0.0f,
+    0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 1.0f
+};
+
+static const float *getGamutMatrix(HDR10_ColorGamut gamut)
+{
+  switch (gamut)
+  {
+    case HDR10_ColorGamut::BT2020: return BT2020_TO_P3;
+    case HDR10_ColorGamut::BT709:  return BT709_TO_P3;
+    case HDR10_ColorGamut::P3:     return P3_TO_P3;
+    default:                        return BT2020_TO_P3;
+  }
+}
 
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
@@ -454,6 +488,27 @@ void HDR10Widget::paintGL()
   glBindTexture(GL_TEXTURE_2D, m_textureId);
 
   glUniform1i(currentProgram->uniformLocation("texture16bit"), 0);
+
+  // Set color processing uniforms (EOTF, gamut, brightness)
+  // These are used by both standard and dither shaders for SDR output
+  glUniform1i(currentProgram->uniformLocation("eotfType"), static_cast<int>(m_eotf));
+  glUniform1i(currentProgram->uniformLocation("sourceGamut"), static_cast<int>(m_colorGamut));
+  glUniform1f(currentProgram->uniformLocation("gammaValue"), m_gammaValue);
+  glUniform1f(currentProgram->uniformLocation("diffuseWhiteNits"), m_diffuseWhiteNits);
+  glUniform1f(currentProgram->uniformLocation("hdrBrightness"), m_hdrBrightness);
+
+  // Set gamut conversion matrix (3x3, column-major for OpenGL)
+  const float *matrixData = getGamutMatrix(m_colorGamut);
+  QMatrix3x3 gamutMat;
+  for (int row = 0; row < 3; ++row)
+  {
+    for (int col = 0; col < 3; ++col)
+    {
+      // OpenGL mat3 column-major: data[col*3+row] = matrix[row*3+col]
+      gamutMat.data()[col * 3 + row] = matrixData[row * 3 + col];
+    }
+  }
+  glUniformMatrix3fv(currentProgram->uniformLocation("gamutMatrix"), 1, GL_FALSE, gamutMat.constData());
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

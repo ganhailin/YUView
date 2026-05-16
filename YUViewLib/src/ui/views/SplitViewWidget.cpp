@@ -38,9 +38,7 @@
 #include <video/FrameHandler.h>
 #include <video/caching/VideoCache.h>
 
-#ifdef Q_OS_MAC
 #include <ui/EDRSettingsDialog.h>
-#endif
 
 #include <QActionGroup>
 #include <QBackingStore>
@@ -152,16 +150,14 @@ void splitViewWidget::updateSettings()
   zoomBoxBackgroundColor     = settings.value(paletteBackgroundColorSettingsTag).value<QColor>();
   drawItemPathAndNameEnabled = settings.value("ShowFilePathInSplitMode", true).toBool();
 
-#ifdef Q_OS_MAC
-  // Load EDR settings from QSettings BEFORE creating/showing HDR widgets,
+  // Load color processing settings from QSettings BEFORE creating/showing HDR widgets,
   // so that the saved values are in member variables when setHDRRenderingMode
-  // creates the MacEDR widget and applies settings to it.
-  m_edrEOTF = static_cast<video::HDR10WidgetMacEDR::EOTF>(settings.value("View/EDR_EOTF", 3).toInt());
-  m_edrColorGamut = static_cast<video::HDR10WidgetMacEDR::ColorGamut>(settings.value("View/EDR_ColorGamut", 1).toInt());
-  m_edrGamma = settings.value("View/EDR_Gamma", 2.2f).toFloat();
-  m_edrDiffuseWhite = settings.value("View/EDR_DiffuseWhite", 203.0f).toFloat();
-  m_edrBrightness = settings.value("View/EDR_Brightness", 1.0f).toFloat();
-#endif
+  // creates the widgets and applies settings to them.
+  m_colorEOTF = static_cast<video::HDR10_EOTF>(settings.value("View/EDR_EOTF", 3).toInt());
+  m_colorGamut = static_cast<video::HDR10_ColorGamut>(settings.value("View/EDR_ColorGamut", 1).toInt());
+  m_colorGamma = settings.value("View/EDR_Gamma", 2.2f).toFloat();
+  m_colorDiffuseWhite = settings.value("View/EDR_DiffuseWhite", 203.0f).toFloat();
+  m_colorBrightness = settings.value("View/EDR_Brightness", 1.0f).toFloat();
 
   // Load HDR rendering mode from settings
   bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
@@ -193,11 +189,11 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       hdr10WidgetMacEDR->setMoveOffset(this->moveOffset);
 
       // Apply EDR color processing settings
-      hdr10WidgetMacEDR->setEOTF(m_edrEOTF);
-      hdr10WidgetMacEDR->setColorGamut(m_edrColorGamut);
-      hdr10WidgetMacEDR->setGammaValue(m_edrGamma);
-      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_edrDiffuseWhite);
-      hdr10WidgetMacEDR->setHDRBrightness(m_edrBrightness);
+      hdr10WidgetMacEDR->setEOTF(static_cast<video::HDR10WidgetMacEDR::EOTF>(m_colorEOTF));
+      hdr10WidgetMacEDR->setColorGamut(static_cast<video::HDR10WidgetMacEDR::ColorGamut>(m_colorGamut));
+      hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
+      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
     }
 
     // Show MacEDR widget by default on macOS (Metal is the preferred EDR path)
@@ -223,12 +219,12 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       hdr10Widget->setZoom(this->zoomFactor);
       hdr10Widget->setMoveOffset(this->moveOffset);
 
-      // Apply HDR color processing settings (for EDR shader - used on non-macOS only)
-      hdr10Widget->setEOTF(m_hdrEOTF);
-      hdr10Widget->setColorGamut(m_hdrColorGamut);
-      hdr10Widget->setGammaValue(m_hdrGamma);
-      hdr10Widget->setDiffuseWhiteNits(m_hdrDiffuseWhite);
-      hdr10Widget->setHDRBrightness(m_hdrBrightness);
+      // Apply color processing settings (from QSettings, loaded in constructor)
+      hdr10Widget->setEOTF(m_colorEOTF);
+      hdr10Widget->setColorGamut(m_colorGamut);
+      hdr10Widget->setGammaValue(m_colorGamma);
+      hdr10Widget->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      hdr10Widget->setHDRBrightness(m_colorBrightness);
 
       QSettings ditherSettings;
       bool ditheringEnabled = ditherSettings.value("View/HDRDithering", false).toBool();
@@ -1451,9 +1447,9 @@ void splitViewWidget::toggleHDRRendering(bool checked)
 
   // Enable/disable dithering action based on HDR mode
   actionHDRDithering.setEnabled(checked);
+  actionEDRSettings.setEnabled(checked);
 #ifdef Q_OS_MAC
   actionEDRMode.setEnabled(checked);
-  actionEDRSettings.setEnabled(checked);
 #endif
 
   // Save the setting
@@ -1508,45 +1504,58 @@ void splitViewWidget::toggleEDRMode(bool checked)
 
 void splitViewWidget::showEDRSettings(bool)
 {
-#ifdef Q_OS_MAC
   EDRSettingsDialog dialog(this);
 
   // Set EDR info in dialog
+#ifdef Q_OS_MAC
   if (hdr10WidgetMacEDR)
     dialog.setEDRInfo(hdr10WidgetMacEDR->isEDRSupported(), hdr10WidgetMacEDR->getMaxEDRValue());
   else
     dialog.setEDRInfo(false, 1.0f);
+#else
+  dialog.setEDRInfo(false, 1.0f);
+#endif
 
   if (dialog.exec() == QDialog::Accepted)
   {
-    // Get values from dialog
-    m_edrEOTF = dialog.eotf();
-    m_edrColorGamut = dialog.colorGamut();
-    m_edrGamma = dialog.gammaValue();
-    m_edrDiffuseWhite = dialog.diffuseWhiteNits();
-    m_edrBrightness = dialog.hdrBrightness();
+    // Get values from dialog (HDR10_EOTF / HDR10_ColorGamut enums are compatible
+    // with HDR10WidgetMacEDR::EOTF / HDR10WidgetMacEDR::ColorGamut)
+    m_colorEOTF = dialog.eotf();
+    m_colorGamut = dialog.colorGamut();
+    m_colorGamma = dialog.gammaValue();
+    m_colorDiffuseWhite = dialog.diffuseWhiteNits();
+    m_colorBrightness = dialog.hdrBrightness();
 
     // Save to QSettings
     QSettings settings;
-    settings.setValue("View/EDR_EOTF", static_cast<int>(m_edrEOTF));
-    settings.setValue("View/EDR_ColorGamut", static_cast<int>(m_edrColorGamut));
-    settings.setValue("View/EDR_Gamma", m_edrGamma);
-    settings.setValue("View/EDR_DiffuseWhite", m_edrDiffuseWhite);
-    settings.setValue("View/EDR_Brightness", m_edrBrightness);
+    settings.setValue("View/EDR_EOTF", static_cast<int>(m_colorEOTF));
+    settings.setValue("View/EDR_ColorGamut", static_cast<int>(m_colorGamut));
+    settings.setValue("View/EDR_Gamma", m_colorGamma);
+    settings.setValue("View/EDR_DiffuseWhite", m_colorDiffuseWhite);
+    settings.setValue("View/EDR_Brightness", m_colorBrightness);
 
-    // Apply to MacEDR widget immediately
+    // Apply to HDR10Widget (OpenGL path, cross-platform)
+    if (hdr10Widget)
+    {
+      hdr10Widget->setEOTF(m_colorEOTF);
+      hdr10Widget->setColorGamut(m_colorGamut);
+      hdr10Widget->setGammaValue(m_colorGamma);
+      hdr10Widget->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      hdr10Widget->setHDRBrightness(m_colorBrightness);
+    }
+
+    // Apply to MacEDR widget immediately (macOS Metal path)
+#ifdef Q_OS_MAC
     if (hdr10WidgetMacEDR)
     {
-      hdr10WidgetMacEDR->setEOTF(m_edrEOTF);
-      hdr10WidgetMacEDR->setColorGamut(m_edrColorGamut);
-      hdr10WidgetMacEDR->setGammaValue(m_edrGamma);
-      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_edrDiffuseWhite);
-      hdr10WidgetMacEDR->setHDRBrightness(m_edrBrightness);
+      hdr10WidgetMacEDR->setEOTF(static_cast<video::HDR10WidgetMacEDR::EOTF>(m_colorEOTF));
+      hdr10WidgetMacEDR->setColorGamut(static_cast<video::HDR10WidgetMacEDR::ColorGamut>(m_colorGamut));
+      hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
+      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
     }
-  }
-#else
-  // No-op on non-macOS
 #endif
+  }
 }
 
 void splitViewWidget::resetViewInternal()
@@ -2150,18 +2159,18 @@ void splitViewWidget::createMenuActions()
                            "When enabled, uses CAMetalLayer with Extended Linear Display P3 "
                            "color space for reliable HDR output on Mac displays.");
   actionEDRMode.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
+#endif
 
-  // EDR settings dialog action (macOS only)
+  // Color settings dialog action (cross-platform)
   configureAction(this->actionEDRSettings,
                   nullptr,
-                  "EDR Settings...",
+                  "Color Settings...",
                   Checkable(false),
                   Checked(false),
                   &splitViewWidget::showEDRSettings);
-  actionEDRSettings.setToolTip("Configure EDR color processing parameters: EOTF, color gamut, "
+  actionEDRSettings.setToolTip("Configure color processing parameters: EOTF, color gamut, "
                                "diffuse white, and HDR brightness.");
   actionEDRSettings.setEnabled(this->hdrRenderingMode == HDRRenderingMode::Enabled);
-#endif
 
   if (this->isMasterView)
   {
@@ -2393,9 +2402,9 @@ void splitViewWidget::addMenuActions(QMenu *menu)
   menu->addAction(&actionZoomBox);
   menu->addAction(&actionHDRRendering);
   menu->addAction(&actionHDRDithering);
+  menu->addAction(&actionEDRSettings);
 #ifdef Q_OS_MAC
   menu->addAction(&actionEDRMode);
-  menu->addAction(&actionEDRSettings);
 #endif
 
   auto separateViewMenu = menu->addMenu("Separate View");

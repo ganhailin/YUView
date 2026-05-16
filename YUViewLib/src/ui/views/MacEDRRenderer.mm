@@ -94,22 +94,19 @@ MacEDRRenderer::MacEDRRenderer()
 
 MacEDRRenderer::~MacEDRRenderer()
 {
-  // Under ARC, we must release ObjC objects that were stored with __bridge_retained.
-  // Use CFRelease which is ARC-compatible (unlike [obj release]).
-  // Note: When the application is quitting, the NSView hierarchy may already
-  // be destroyed. The overlay layer was added as a sublayer of the Metal layer's
-  // view, so it may have been released by the view already. Remove it first
-  // to avoid double-free, then release our retained reference.
-  if (m_overlayLayer)
-  {
-    CALayer *overlay = (__bridge_transfer CALayer *)m_overlayLayer;
-    // Remove from superlayer if still attached (the superlayer may be gone during quit)
-    if (overlay.superlayer)
-      [overlay removeFromSuperlayer];
-    // __bridge_transfer transfers ownership back to ARC which will release it
-    m_overlayLayer = nullptr;
-  }
-  if (m_metalLayer)      { CFRelease(m_metalLayer); m_metalLayer = nullptr; }
+  // Release Metal objects that we own (not owned by NSView).
+  // During application shutdown, the NSView hierarchy is destroyed first,
+  // which releases m_metalLayer (set as view.layer). We must NOT release
+  // it again here — it would be a double-free / dangling pointer.
+  //
+  // Safe to release (not owned by view):
+  //   m_device, m_commandQueue — created directly from MTLCreateSystemDefaultDevice
+  //   m_pipelineStateVideo, m_videoVertexBuffer, m_rgbaTexture — created from device
+  //
+  // NOT safe to release (owned by view, released when view deallocs):
+  //   m_metalLayer — set as view.layer, view releases it
+  //   m_overlayLayer — added as sublayer, view releases it
+
   if (m_device)          { CFRelease(m_device); m_device = nullptr; }
   if (m_commandQueue)    { CFRelease(m_commandQueue); m_commandQueue = nullptr; }
   if (m_pipelineStateVideo) { CFRelease(m_pipelineStateVideo); m_pipelineStateVideo = nullptr; }
@@ -205,7 +202,8 @@ bool MacEDRRenderer::initialize(QWindow *window)
     qInfo() << "MacEDRRenderer: macOS < 10.15, EDR not available";
   }
 
-  m_metalLayer = (__bridge_retained void *)metalLayer;
+  // view.layer now owns metalLayer — use __bridge (no extra retain)
+  m_metalLayer = (__bridge void *)metalLayer;
 
   // 将 MetalLayer 添加到 NSView
   view.wantsLayer = YES;
@@ -276,7 +274,9 @@ bool MacEDRRenderer::initialize(QWindow *window)
     overlayLayer.contentsGravity = kCAGravityTopLeft;
     // Add above the Metal layer in the layer hierarchy
     [view.layer addSublayer:overlayLayer];
-    m_overlayLayer = (__bridge_retained void *)overlayLayer;
+    // Use __bridge (no retain) — the view owns the layer via addSublayer.
+    // We only need a weak reference to update contents later.
+    m_overlayLayer = (__bridge void *)overlayLayer;
   }
 
   m_initialized = true;

@@ -309,24 +309,17 @@ protected:
   HDRRenderingMode                      hdrRenderingMode{HDRRenderingMode::Disabled};
   std::unique_ptr<video::HDR10Widget>   hdr10Widget;
 
+  // Color processing parameters (cross-platform, used by both OpenGL and Metal paths)
+  video::HDR10_EOTF       m_colorEOTF{video::HDR10_EOTF::SRGB};
+  video::HDR10_ColorGamut m_colorGamut{video::HDR10_ColorGamut::BT709};
+  float                   m_colorGamma{2.2f};
+  float                   m_colorDiffuseWhite{203.0f};
+  float                   m_colorBrightness{1.0f};
+
 #ifdef Q_OS_MAC
   // macOS EDR: Metal-based renderer widget (more reliable EDR than OpenGL on macOS)
   std::unique_ptr<video::HDR10WidgetMacEDR> hdr10WidgetMacEDR;
-
-  // EDR control parameters
-  video::HDR10WidgetMacEDR::EOTF       m_edrEOTF{video::HDR10WidgetMacEDR::EOTF::SRGB};
-  video::HDR10WidgetMacEDR::ColorGamut m_edrColorGamut{video::HDR10WidgetMacEDR::ColorGamut::BT709};
-  float                                m_edrGamma{2.2f};
-  float                                m_edrDiffuseWhite{203.0f};
-  float                                m_edrBrightness{1.0f};
 #endif
-
-  // HDR EOTF/Gamut control (for OpenGL HDR10Widget EDR shader on macOS)
-  video::HDR10_EOTF       m_hdrEOTF{video::HDR10_EOTF::SRGB};
-  video::HDR10_ColorGamut m_hdrColorGamut{video::HDR10_ColorGamut::BT709};
-  float                   m_hdrGamma{2.2f};
-  float                   m_hdrDiffuseWhite{203.0f};
-  float                   m_hdrBrightness{1.0f};
 
   // Freezing of the view
   bool isViewFrozen{false}; //!< Is the view frozen?

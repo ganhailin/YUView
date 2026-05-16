@@ -18,24 +18,20 @@
 
 #pragma once
 
-#include <QtGlobal>
-
-#ifdef Q_OS_MAC
-
 #include <QDialog>
-#include <ui/views/HDR10WidgetMacEDR.h>
+#include <ui/views/HDR10Widget.h>
 
 #include "ui_edrSettingsDialog.h"
 
 /**
- * @brief EDR 显示设置对话框
+ * @brief 色彩处理设置对话框
  *
- * 允许用户配置 macOS Metal EDR 渲染器的色彩处理参数：
+ * 允许用户配置色彩处理参数（跨平台，适用于 OpenGL 和 Metal 渲染器）：
  * - EOTF (电光转换函数): PQ / HLG / Gamma / sRGB
  * - Color Gamut (源色域): BT.2020 / BT.709 / P3
  * - Gamma 值 (仅当 EOTF=Gamma 时有效)
  * - Diffuse White 漫射白亮度 (nits)
- * - HDR Brightness 亮度倍率 (>1.0 触发 EDR)
+ * - HDR Brightness 亮度倍率 (>1.0 触发 EDR，仅 macOS Metal 路径有效)
  */
 class EDRSettingsDialog : public QDialog
 {
@@ -44,9 +40,9 @@ class EDRSettingsDialog : public QDialog
 public:
   explicit EDRSettingsDialog(QWidget *parent = nullptr);
 
-  // Get current values
-  video::HDR10WidgetMacEDR::EOTF eotf() const;
-  video::HDR10WidgetMacEDR::ColorGamut colorGamut() const;
+  // Get current values (uses HDR10Widget enums, compatible with HDR10WidgetMacEDR)
+  video::HDR10_EOTF eotf() const;
+  video::HDR10_ColorGamut colorGamut() const;
   float gammaValue() const;
   float diffuseWhiteNits() const;
   float hdrBrightness() const;
@@ -60,5 +56,3 @@ private slots:
 private:
   Ui::EDRSettingsDialog ui;
 };
-
-#endif // Q_OS_MAC

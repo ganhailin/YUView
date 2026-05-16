@@ -16,10 +16,6 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <QtGlobal>
-
-#ifdef Q_OS_MAC
-
 #include "EDRSettingsDialog.h"
 
 #include <QSettings>
@@ -63,14 +59,14 @@ void EDRSettingsDialog::onEOTFChanged(int index)
   ui.labelGamma->setEnabled(gammaEnabled);
 }
 
-video::HDR10WidgetMacEDR::EOTF EDRSettingsDialog::eotf() const
+video::HDR10_EOTF EDRSettingsDialog::eotf() const
 {
-  return static_cast<video::HDR10WidgetMacEDR::EOTF>(ui.comboBoxEOTF->currentIndex());
+  return static_cast<video::HDR10_EOTF>(ui.comboBoxEOTF->currentIndex());
 }
 
-video::HDR10WidgetMacEDR::ColorGamut EDRSettingsDialog::colorGamut() const
+video::HDR10_ColorGamut EDRSettingsDialog::colorGamut() const
 {
-  return static_cast<video::HDR10WidgetMacEDR::ColorGamut>(ui.comboBoxGamut->currentIndex());
+  return static_cast<video::HDR10_ColorGamut>(ui.comboBoxGamut->currentIndex());
 }
 
 float EDRSettingsDialog::gammaValue() const
@@ -90,6 +86,7 @@ float EDRSettingsDialog::hdrBrightness() const
 
 void EDRSettingsDialog::setEDRInfo(bool supported, float maxEDR)
 {
+#ifdef Q_OS_MAC
   if (supported)
     ui.labelEDRInfo->setText(QString("EDR: Supported (max %1x)\n"
                                      "HDR Brightness > 1.0 will trigger EDR highlights.")
@@ -97,6 +94,10 @@ void EDRSettingsDialog::setEDRInfo(bool supported, float maxEDR)
   else
     ui.labelEDRInfo->setText(QString("EDR: Not supported on this display.\n"
                                      "HDR Brightness has no effect without EDR capability."));
+#else
+  Q_UNUSED(supported)
+  Q_UNUSED(maxEDR)
+  ui.labelEDRInfo->setText(QString("EDR: Not available on this platform.\n"
+                                   "Color processing uses sRGB SDR output."));
+#endif
 }
-
-#endif // Q_OS_MAC
