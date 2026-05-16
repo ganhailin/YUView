@@ -102,10 +102,8 @@ public:
   void setDiffuseWhiteNits(float nits) { m_diffuseWhiteNits = nits; update(); }
   void setHDRBrightness(float brightness) { m_hdrBrightness = brightness; update(); }
 
-  // EDR state query
+  // State query
   bool supports10bit() const { return m_supports10bit; }
-  bool isEDRSupported() const { return m_edrSupported; }
-  float getMaxEDRValue() const { return m_maxEDRValue; }
   QString getOpenGLInfo() const { return m_openglInfo; }
 
 protected:
@@ -161,12 +159,6 @@ private:
   float            m_diffuseWhiteNits{203.0f};
   float            m_hdrBrightness{1.0f};
 
-  // macOS EDR state
-  bool  m_edrSupported{false};
-  float m_maxEDRValue{1.0f};
-
-  // EDR shader program (macOS only - uses float output exceeding 1.0)
-  QOpenGLShaderProgram *m_programEDR{nullptr};
 
   double m_zoom{1.0};
   QPointF m_moveOffset{0, 0};

@@ -35,50 +35,13 @@
 #include <video/yuv/videoHandlerYUV.h>
 
 #include <QDebug>
-#include <QMatrix3x3>
 #include <QSurfaceFormat>
 #include <QPainter>
 #include <QSettings>
 
-#ifdef Q_OS_MAC
-#include <ui/views/MacEDRUtil.h>
-#endif
 
 namespace video
 {
-
-// Gamut conversion matrices (source → Display P3, via XYZ intermediate)
-// BT.2020 → Display P3
-static const float BT2020_TO_P3[9] = {
-    1.343578f, -0.282180f, -0.061404f,
-   -0.065298f,  1.075788f, -0.010490f,
-    0.002822f, -0.019594f,  1.016915f
-};
-
-// BT.709 → Display P3
-static const float BT709_TO_P3[9] = {
-    0.822462f,  0.177536f, -0.000004f,
-    0.033194f,  0.966807f, -0.000000f,
-    0.017085f,  0.072414f,  0.910644f
-};
-
-// P3 → P3 (identity)
-static const float P3_TO_P3[9] = {
-    1.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 1.0f
-};
-
-static const float *getGamutMatrix(HDR10_ColorGamut gamut)
-{
-  switch (gamut)
-  {
-    case HDR10_ColorGamut::BT2020: return BT2020_TO_P3;
-    case HDR10_ColorGamut::BT709:  return BT709_TO_P3;
-    case HDR10_ColorGamut::P3:     return P3_TO_P3;
-    default:                        return BT2020_TO_P3;
-  }
-}
 
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
@@ -134,7 +97,6 @@ HDR10Widget::~HDR10Widget()
       glDeleteTextures(1, &m_textureId);
     delete m_program;
     delete m_programDither;
-    delete m_programEDR;
     doneCurrent();
   }
   else
@@ -143,7 +105,6 @@ HDR10Widget::~HDR10Widget()
     // (Qt will clean up the GL framebuffer objects internally)
     m_program = nullptr;
     m_programDither = nullptr;
-    m_programEDR = nullptr;
   }
 }
 
@@ -238,29 +199,10 @@ void HDR10Widget::initializeGL()
     qInfo() << "HDR10Widget: 10-bit supported (" << redBits << "/" << greenBits << "/" << blueBits << "bits)";
   }
 
-#ifdef Q_OS_MAC
-  // Check macOS EDR support via Objective-C++ helper (avoid Cocoa headers in C++ files)
-  MacEDRInfo edrInfo = MacEDRUtil::queryEDRSupport();
-  m_edrSupported = edrInfo.edrSupported;
-  m_maxEDRValue = edrInfo.maxEDRValue;
-
-  if (m_edrSupported)
-  {
-    qInfo() << "HDR10Widget: macOS EDR supported, max EDR value:" << m_maxEDRValue;
-  }
-  else
-  {
-    qInfo() << "HDR10Widget: macOS EDR not available on current display (max EDR:" << m_maxEDRValue << ")";
-  }
-#endif
 
   m_openglInfo = QString("OpenGL %1, Renderer: %2, %3-bit")
                      .arg(version, renderer)
                      .arg(m_bitDepth);
-#ifdef Q_OS_MAC
-  if (m_edrSupported)
-    m_openglInfo += QString(", EDR %1x").arg(m_maxEDRValue);
-#endif
 
   qInfo() << "HDR10Widget:" << m_openglInfo;
 
@@ -288,12 +230,6 @@ void HDR10Widget::initShaders()
   if (!m_programDither->link())
     qWarning() << "HDR10Widget: Dither shader link error:" << m_programDither->log();
 
-  // EDR shader for macOS: outputs float values > 1.0 to trigger EDR
-  m_programEDR = new QOpenGLShaderProgram(this);
-  m_programEDR->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
-  m_programEDR->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/hdr10_fragment_edr.glsl");
-  if (!m_programEDR->link())
-    qWarning() << "HDR10Widget: EDR shader link error:" << m_programEDR->log();
 }
 
 void HDR10Widget::initGeometry()
@@ -499,16 +435,9 @@ void HDR10Widget::paintGL()
 
   QOpenGLShaderProgram *currentProgram = nullptr;
 
-#ifdef Q_OS_MAC
-  // On macOS, QOpenGLWidget's internal FBO is always 8-bit RGBA (no float support).
-  // EDR output (>1.0 values) is NOT possible through QOpenGLWidget on macOS.
-  // EDR must be handled by the Metal-based HDR10WidgetMacEDR instead.
-  // Therefore, on macOS, HDR10Widget always uses the standard shader (0-1.0 range)
-  // and the MacEDR widget handles the EDR path.
-  //
-  // If MacEDR widget is not available (e.g. Metal initialization failed),
-  // the standard shader provides the best possible SDR rendering.
-  // The dither shader can still be used for improved 8-bit rendering.
+  // EDR output (>1.0 values) is NOT possible through QOpenGLWidget on macOS
+  // (internal FBO is 8-bit RGBA). On macOS, EDR is handled by the Metal-based
+  // HDR10WidgetMacEDR. This widget always uses the standard or dither shader.
   if (m_ditheringEnabled)
   {
     currentProgram = m_programDither;
@@ -517,21 +446,6 @@ void HDR10Widget::paintGL()
   {
     currentProgram = m_program;
   }
-#else
-  // Non-macOS: Use EDR shader if available, or standard/dither based on settings
-  if (m_edrSupported && m_programEDR)
-  {
-    currentProgram = m_programEDR;
-  }
-  else if (m_ditheringEnabled)
-  {
-    currentProgram = m_programDither;
-  }
-  else
-  {
-    currentProgram = m_program;
-  }
-#endif
 
   currentProgram->bind();
   m_vao.bind();
@@ -540,34 +454,6 @@ void HDR10Widget::paintGL()
   glBindTexture(GL_TEXTURE_2D, m_textureId);
 
   glUniform1i(currentProgram->uniformLocation("texture16bit"), 0);
-
-#ifndef Q_OS_MAC
-  // Set EDR shader uniforms (color processing pipeline) - only on non-macOS
-  // On macOS, EDR is handled by Metal-based HDR10WidgetMacEDR, not OpenGL shader
-  if (currentProgram == m_programEDR)
-  {
-    glUniform1i(currentProgram->uniformLocation("eotfType"), static_cast<int>(m_eotf));
-    glUniform1i(currentProgram->uniformLocation("sourceGamut"), static_cast<int>(m_colorGamut));
-    glUniform1f(currentProgram->uniformLocation("gammaValue"), m_gammaValue);
-    glUniform1f(currentProgram->uniformLocation("diffuseWhiteNits"), m_diffuseWhiteNits);
-    glUniform1f(currentProgram->uniformLocation("hdrBrightness"), m_hdrBrightness);
-
-    // Set gamut conversion matrix (3x3, column-major for OpenGL)
-    const float *matrixData = getGamutMatrix(m_colorGamut);
-    // OpenGL mat3 expects column-major order, but our matrix is row-major
-    // Need to transpose
-    QMatrix3x3 gamutMat;
-    for (int row = 0; row < 3; ++row)
-    {
-      for (int col = 0; col < 3; ++col)
-      {
-        // OpenGL mat3 column-major: data[col*3+row] = matrix[row*3+col]
-        gamutMat.data()[col * 3 + row] = matrixData[row * 3 + col];
-      }
-    }
-    glUniformMatrix3fv(currentProgram->uniformLocation("gamutMatrix"), 1, GL_FALSE, gamutMat.constData());
-  }
-#endif
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

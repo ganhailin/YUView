@@ -271,10 +271,8 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
 bool splitViewWidget::isHDRSupported() const
 {
 #ifdef Q_OS_MAC
-  // On macOS, EDR is supported via Metal widget or OpenGL EDR shader
+  // On macOS, EDR is supported via Metal-based HDR10WidgetMacEDR
   if (hdr10WidgetMacEDR && hdr10WidgetMacEDR->isEDRSupported())
-    return true;
-  if (hdr10Widget && hdr10Widget->isEDRSupported())
     return true;
 #endif
   // HDR is supported if we have an HDR10Widget and it supports 10-bit output
