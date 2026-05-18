@@ -44,6 +44,8 @@ isEmpty(SVNN) {
 
 win32 {
     DEFINES += NOMINMAX
+    # Windows DXGI HDR support - libs needed for linking
+    LIBS += -ld3d11 -ldxgi -ld3dcompiler
 }
 
 win32-msvc* {

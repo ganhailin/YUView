@@ -40,6 +40,9 @@
 #ifdef Q_OS_MAC
 #include <ui/views/HDR10WidgetMacEDR.h>
 #endif
+#ifdef Q_OS_WIN
+#include <ui/views/HDR10WidgetWinDXGI.h>
+#endif
 
 #include <ui/views/MoveAndZoomableView.h>
 
@@ -121,7 +124,8 @@ public:
   enum class HDRRenderingMode
   {
     Disabled,     // Use standard QPainter rendering (8-bit)
-    Enabled       // Use HDR10Widget for OpenGL rendering (10-bit capable)
+    Enabled,      // Use HDR10Widget for OpenGL rendering (10-bit capable)
+    DXGI          // Use HDR10WidgetWinDXGI for native Windows HDR (DXGI/D3D11)
   };
 
   // Get and set the HDR rendering mode
@@ -176,6 +180,7 @@ private slots:
   void toggleHDRRendering(bool checked);
   void toggleHDRDithering(bool checked);
   void toggleEDRMode(bool checked);
+  void toggleDXGIMode(bool checked);
   void showEDRSettings(bool checked = false);
 
 protected:
@@ -224,6 +229,7 @@ protected:
   QAction                       actionHDRRendering;
   QAction                       actionHDRDithering;
   QAction                       actionEDRMode;          // Toggle Metal EDR mode on macOS
+  QAction                       actionDXGIMode;         // Toggle DXGI HDR mode on Windows
   QAction                       actionEDRSettings;      // Open EDR settings dialog on macOS
 
   void         updateMouseTracking();
@@ -319,6 +325,10 @@ protected:
 #ifdef Q_OS_MAC
   // macOS EDR: Metal-based renderer widget (more reliable EDR than OpenGL on macOS)
   std::unique_ptr<video::HDR10WidgetMacEDR> hdr10WidgetMacEDR;
+#endif
+#ifdef Q_OS_WIN
+  // Windows HDR: DXGI-based renderer widget (native HDR via scRGB swap chain)
+  std::unique_ptr<video::HDR10WidgetWinDXGI> hdr10WidgetWin;
 #endif
 
   // Freezing of the view

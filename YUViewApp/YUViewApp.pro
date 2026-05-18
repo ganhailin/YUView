@@ -19,6 +19,10 @@ macx {
     LIBS += -framework Metal -framework MetalKit -framework QuartzCore -framework Cocoa
 }
 
+win32 {
+    LIBS += -ld3d11 -ldxgi -ld3dcompiler -luser32
+}
+
 win32-msvc* {
     PRE_TARGETDEPS += $$top_builddir/YUViewLib/YUViewLib.lib
 } else {
