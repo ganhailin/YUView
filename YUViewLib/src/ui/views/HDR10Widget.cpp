@@ -151,7 +151,10 @@ void HDR10Widget::setFrame(const VideoFrame &frame)
     m_currentFrame.is16bitGenerateFrom8bit() ? nullptr : m_currentFrame.getData16bit();
   auto new_size_empty = frame.getSize().isEmpty();
   auto old_size_empty = m_frameSize.isEmpty();
-  if (newData != oldData || (new_size_empty != old_size_empty && (frame.getSize() != m_frameSize)))
+  std::shared_ptr<QImage> newImage8 = frame.getImage8bit();
+  std::shared_ptr<QImage> oldImage8 = m_currentFrame.getImage8bit();
+  if (newData != oldData || (new_size_empty != old_size_empty && (frame.getSize() != m_frameSize)) ||
+      newImage8 != oldImage8)
   {
     m_currentFrame = frame;
     if (!newData)

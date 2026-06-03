@@ -64,18 +64,17 @@ public:
   VideoFrame(VideoFrame &&)                 = default;
   VideoFrame &operator=(VideoFrame &&)      = default;
 
-  const QImage &getImage8bit() const { return image8bit; }
-  QImage &getImage8bit() { return image8bit; }
+  std::shared_ptr<QImage> getImage8bit() const { return image8bit; }
 
   const uint16_t *getData16bit() const { return buffer16bit ? buffer16bit->data() : nullptr; }
   uint16_t *getData16bit() { return buffer16bit ? buffer16bit->data() : nullptr; }
 
   bool has16bitBuffer() const { return buffer16bit && !buffer16bit->isEmpty(); }
 
-  QSize getSize() const { return image8bit.size(); }
-  int   width() const { return image8bit.width(); }
-  int   height() const { return image8bit.height(); }
-  bool  isValid() const { return !image8bit.isNull(); }
+  QSize getSize() const { return image8bit ? image8bit->size() : QSize(); }
+  int   width() const { return image8bit ? image8bit->width() : 0; }
+  int   height() const { return image8bit ? image8bit->height() : 0; }
+  bool  isValid() const { return image8bit && !image8bit->isNull(); }
 
   void clear();
 
@@ -87,7 +86,7 @@ public:
 
 private:
   bool is16bitGenerateFrom8bit_ = false;
-  QImage          image8bit;
+  std::shared_ptr<QImage>          image8bit;
   std::shared_ptr<QVector<uint16_t>> buffer16bit;
 };
 

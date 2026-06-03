@@ -36,40 +36,40 @@
 namespace video
 {
 
-VideoFrame::VideoFrame(const QImage &image) : image8bit(image.convertToFormat(QImage::Format_ARGB32))
+VideoFrame::VideoFrame(const QImage &image) : image8bit(std::make_shared<QImage>(image.convertToFormat(QImage::Format_ARGB32)))
 {
 }
 
-VideoFrame::VideoFrame(const QSize &size) : image8bit(size, QImage::Format_ARGB32)
+VideoFrame::VideoFrame(const QSize &size) : image8bit(std::make_shared<QImage>(size, QImage::Format_ARGB32))
 {
-  image8bit.fill(Qt::black);
+  image8bit->fill(Qt::black);
 }
 
-VideoFrame::VideoFrame(int width, int height) : image8bit(width, height, QImage::Format_ARGB32)
+VideoFrame::VideoFrame(int width, int height) : image8bit(std::make_shared<QImage>(width, height, QImage::Format_ARGB32))
 {
-  image8bit.fill(Qt::black);
+  image8bit->fill(Qt::black);
 }
 
 void VideoFrame::clear()
 {
-  image8bit = QImage();
+  image8bit.reset();
   buffer16bit.reset();
 }
 
 void VideoFrame::generate16bitBuffer()
 {
-  if (image8bit.isNull())
+  if (!image8bit || image8bit->isNull())
     return;
 
-  const int w = image8bit.width();
-  const int h = image8bit.height();
+  const int w = image8bit->width();
+  const int h = image8bit->height();
   const int numPixels = w * h;
   const int numComponents = numPixels * 4; // RGBA
 
   buffer16bit = std::make_shared<QVector<uint16_t>>(numComponents);
 
-  const uchar *srcBits = image8bit.constBits();
-  const int   bytesPerLine = image8bit.bytesPerLine();
+  const uchar *srcBits = image8bit->constBits();
+  const int   bytesPerLine = image8bit->bytesPerLine();
 
   uint16_t *dst = buffer16bit->data();
 
@@ -96,8 +96,8 @@ void VideoFrame::generate16bitBuffer()
 void VideoFrame::set16bitBuffer(QVector<uint16_t> &&data, int width, int height)
 {
   buffer16bit = std::make_shared<QVector<uint16_t>>(std::move(data));
-  if (image8bit.size() != QSize(width, height))
-    image8bit = QImage(width, height, QImage::Format_ARGB32);
+  if (!image8bit || image8bit->size() != QSize(width, height))
+    image8bit = std::make_shared<QImage>(width, height, QImage::Format_ARGB32);
 }
 
 } // namespace video
