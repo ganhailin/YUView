@@ -32,6 +32,7 @@
 
 #include "FrameHandler.h"
 
+#include <QDebug>
 #include <QPainter>
 
 #include <common/FunctionsGui.h>
@@ -134,6 +135,18 @@ QLayout *FrameHandler::createFrameHandlerControls(bool isSizeFixed)
   int idx = presetFrameSizes.findSize(frameSize);
   ui.frameSizeComboBox->setCurrentIndex(idx);
   ui.frameSizeComboBox->setEnabled(!isSizeFixed);
+  ui.fbcFormatComboBox->addItems(functions::toQStringList(FBCFormatMapper.getNames()));
+  ui.fbcFormatComboBox->setCurrentIndex(int(FBCFormatMapper.indexOf(this->fbcFormat)));
+  ui.fbcFormatComboBox->setEnabled(!isSizeFixed);
+
+  // AFBC custom options
+  ui.afbcCustomOptionsCheckBox->setChecked(this->afbcCustomOptions);
+  ui.afbcYuvTfCheckBox->setChecked(this->afbcYuvTf);
+  ui.afbcSplitModeCheckBox->setChecked(this->afbcSplitMode);
+  ui.afbcYoffsetSpinBox->setValue(this->afbcYoffset);
+  ui.afbcLayoutComboBox->addItems(functions::toQStringList(AFBCLayoutMapper.getNames()));
+  ui.afbcLayoutComboBox->setCurrentIndex(int(AFBCLayoutMapper.indexOf(this->afbcLayout)));
+  updateAfbcOptionWidgetsEnabled();
 
   // Connect all the change signals from the controls to "connectWidgetSignals()"
   connect(ui.widthSpinBox,
@@ -145,6 +158,30 @@ QLayout *FrameHandler::createFrameHandlerControls(bool isSizeFixed)
           this,
           &FrameHandler::slotVideoControlChanged);
   connect(ui.frameSizeComboBox,
+          QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.fbcFormatComboBox,
+          QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.afbcCustomOptionsCheckBox,
+          &QCheckBox::stateChanged,
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.afbcYuvTfCheckBox,
+          &QCheckBox::stateChanged,
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.afbcSplitModeCheckBox,
+          &QCheckBox::stateChanged,
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.afbcYoffsetSpinBox,
+          QOverload<int>::of(&QSpinBox::valueChanged),
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.afbcLayoutComboBox,
           QOverload<int>::of(&QComboBox::currentIndexChanged),
           this,
           &FrameHandler::slotVideoControlChanged);
@@ -201,11 +238,31 @@ bool FrameHandler::loadCurrentImageFromFile(const QString &filePath)
   return (!this->currentImage.isNull());
 }
 
+QString FrameHandler::getAfbcModeSuffix() const
+{
+  if (!this->afbcCustomOptions)
+    return {};
+
+  return QString("_%1_%2_%3_%4")
+      .arg(this->afbcYuvTf ? "1" : "0")
+      .arg(this->afbcSplitMode ? "1" : "0")
+      .arg(this->afbcYoffset)
+      .arg(int(this->afbcLayout));
+}
+
 void FrameHandler::savePlaylist(YUViewDomElement &element) const
 {
   // Append the video handler properties
   element.appendProperiteChild("width", QString::number(this->frameSize.width));
   element.appendProperiteChild("height", QString::number(this->frameSize.height));
+  element.appendProperiteChild("fbcFormat",
+                               QString::fromStdString(std::string(FBCFormatMapper.getName(this->fbcFormat))));
+  element.appendProperiteChild("afbcCustomOptions", QString::number(this->afbcCustomOptions ? 1 : 0));
+  element.appendProperiteChild("afbcYuvTf", QString::number(this->afbcYuvTf ? 1 : 0));
+  element.appendProperiteChild("afbcSplitMode", QString::number(this->afbcSplitMode ? 1 : 0));
+  element.appendProperiteChild("afbcYoffset", QString::number(this->afbcYoffset));
+  element.appendProperiteChild("afbcLayout",
+                               QString::fromStdString(std::string(AFBCLayoutMapper.getName(this->afbcLayout))));
 }
 
 void FrameHandler::loadPlaylist(const YUViewDomElement &root)
@@ -213,10 +270,46 @@ void FrameHandler::loadPlaylist(const YUViewDomElement &root)
   auto width  = unsigned(root.findChildValue("width").toInt());
   auto height = unsigned(root.findChildValue("height").toInt());
   this->setFrameSize(Size(width, height));
+
+  auto fbcFormatName = root.findChildValue("fbcFormat");
+  if (!fbcFormatName.isEmpty())
+  {
+    if (auto newFormat = FBCFormatMapper.getValue(fbcFormatName.toStdString()))
+      this->fbcFormat = *newFormat;
+    else if (fbcFormatName == "AFBC 32x8" || fbcFormatName == "AFBC 16x16")
+      this->fbcFormat = FBCFormat::AFBC;
+  }
+
+  auto afbcCustomOptionsVal = root.findChildValue("afbcCustomOptions");
+  if (!afbcCustomOptionsVal.isEmpty())
+    this->afbcCustomOptions = (afbcCustomOptionsVal == "1");
+
+  auto afbcYuvTfVal = root.findChildValue("afbcYuvTf");
+  if (!afbcYuvTfVal.isEmpty())
+    this->afbcYuvTf = (afbcYuvTfVal == "1");
+
+  auto afbcSplitModeVal = root.findChildValue("afbcSplitMode");
+  if (!afbcSplitModeVal.isEmpty())
+    this->afbcSplitMode = (afbcSplitModeVal == "1");
+
+  auto afbcYoffsetVal = root.findChildValue("afbcYoffset");
+  if (!afbcYoffsetVal.isEmpty())
+    this->afbcYoffset = functions::clip(afbcYoffsetVal.toInt(), 0, 15);
+
+  auto afbcLayoutName = root.findChildValue("afbcLayout");
+  if (!afbcLayoutName.isEmpty())
+    if (auto newLayout = AFBCLayoutMapper.getValue(afbcLayoutName.toStdString()))
+      this->afbcLayout = *newLayout;
 }
 
 void FrameHandler::slotVideoControlChanged()
 {
+  if (checkFbcFormatChanged())
+    return;
+
+  if (checkAfbcOptionsChanged())
+    return;
+
   // Update the controls and get the new selected size
   auto newSize = getNewSizeFromControls();
   DEBUG_FRAME(
@@ -229,6 +322,102 @@ void FrameHandler::slotVideoControlChanged()
     // The frame size changed. We need to redraw/re-cache.
     emit signalHandlerChanged(true, RECACHE_CLEAR);
   }
+}
+
+bool FrameHandler::checkFbcFormatChanged()
+{
+  auto sender = QObject::sender();
+  if (sender == ui.fbcFormatComboBox)
+  {
+    auto newFormat = FBCFormatMapper.getValueAt(ui.fbcFormatComboBox->currentIndex());
+    if (newFormat && *newFormat != this->fbcFormat)
+    {
+      this->fbcFormat = *newFormat;
+      this->onFbcFormatChanged();
+      updateAfbcOptionWidgetsEnabled();
+      return true;
+    }
+    // Same format selected, nothing to do
+    return true;
+  }
+  return false;
+}
+
+bool FrameHandler::checkAfbcOptionsChanged()
+{
+  auto sender = QObject::sender();
+  bool changed = false;
+
+  if (sender == ui.afbcCustomOptionsCheckBox)
+  {
+    bool newVal = ui.afbcCustomOptionsCheckBox->isChecked();
+    if (newVal != this->afbcCustomOptions)
+    {
+      this->afbcCustomOptions = newVal;
+      changed = true;
+    }
+    updateAfbcOptionWidgetsEnabled();
+    if (changed)
+      this->onFbcFormatChanged();
+    return true;
+  }
+
+  // All sub-options only matter when Custom Options is enabled
+  if (sender == ui.afbcYuvTfCheckBox)
+  {
+    bool newVal = ui.afbcYuvTfCheckBox->isChecked();
+    if (newVal != this->afbcYuvTf)
+    {
+      this->afbcYuvTf = newVal;
+      changed = true;
+    }
+  }
+  else if (sender == ui.afbcSplitModeCheckBox)
+  {
+    bool newVal = ui.afbcSplitModeCheckBox->isChecked();
+    if (newVal != this->afbcSplitMode)
+    {
+      this->afbcSplitMode = newVal;
+      changed = true;
+    }
+  }
+  else if (sender == ui.afbcYoffsetSpinBox)
+  {
+    int newVal = ui.afbcYoffsetSpinBox->value();
+    if (newVal != this->afbcYoffset)
+    {
+      this->afbcYoffset = newVal;
+      changed = true;
+    }
+  }
+  else if (sender == ui.afbcLayoutComboBox)
+  {
+    auto newLayout = AFBCLayoutMapper.getValueAt(ui.afbcLayoutComboBox->currentIndex());
+    if (newLayout && *newLayout != this->afbcLayout)
+    {
+      this->afbcLayout = *newLayout;
+      changed = true;
+    }
+  }
+  else
+  {
+    return false;
+  }
+
+  if (changed)
+    this->onFbcFormatChanged();
+  return true;
+}
+
+void FrameHandler::updateAfbcOptionWidgetsEnabled()
+{
+  bool afbcActive = (this->fbcFormat != FBCFormat::Raster);
+  ui.afbcCustomOptionsCheckBox->setEnabled(afbcActive);
+  bool customEnabled = afbcActive && this->afbcCustomOptions;
+  ui.afbcYuvTfCheckBox->setEnabled(customEnabled);
+  ui.afbcSplitModeCheckBox->setEnabled(customEnabled);
+  ui.afbcYoffsetSpinBox->setEnabled(customEnabled);
+  ui.afbcLayoutComboBox->setEnabled(customEnabled);
 }
 
 Size FrameHandler::getNewSizeFromControls()

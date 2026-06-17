@@ -42,7 +42,12 @@
 #include <video/rgb/videoHandlerRGBCustomFormatDialog.h>
 
 #include <QPainter>
+#include <QDebug>
 #include <QMutexLocker>
+#include <QDir>
+#include <QProcess>
+#include <QSettings>
+#include <QTemporaryFile>
 #include <QtGlobal>
 
 namespace video::rgb
@@ -463,6 +468,71 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
   {
     DEBUG_RGB("videoHandlerRGB::loadFrame Loading failed or is still running in the background");
     return;
+  }
+
+  // Decode AFBC compressed data using the external decoder tool
+  if (this->fbcFormat != FBCFormat::Raster)
+  {
+    QSettings settings;
+    settings.beginGroup("RKTools");
+    QString afbcDecoderPath = settings.value("AFBCDecoderPath", "").toString();
+    settings.endGroup();
+    if (!afbcDecoderPath.isEmpty())
+    {
+      // Write raw AFBC data to a temp file
+      QTemporaryFile tempIn(QDir::temp().filePath("afbc_XXXXXX.raw"));
+      tempIn.setAutoRemove(false);
+      tempIn.open();
+      tempIn.write(this->currentFrameRawData);
+      tempIn.close();
+
+      QTemporaryFile tempOut(QDir::temp().filePath("raster_XXXXXX.raw"));
+      tempOut.setAutoRemove(false);
+      tempOut.open();
+      tempOut.close();
+
+      auto bitsPerSample = this->srcPixelFormat.getBitsPerSample();
+      bool hasAlpha = this->srcPixelFormat.hasAlpha();
+
+      // Build mode string like "r8g8b8" or "r8g8b8a8"
+      QString mode = QString("r%1g%2b%3").arg(bitsPerSample).arg(bitsPerSample).arg(bitsPerSample);
+      if (hasAlpha)
+        mode += QString("a%1").arg(bitsPerSample);
+      mode += this->getAfbcModeSuffix();
+
+      QStringList args;
+      args << "-h" << QString::number(this->frameSize.width)+"x"+QString::number(this->frameSize.height)+"_"+mode
+           << "-i"  << tempIn.fileName()
+           << "-o" << tempOut.fileName();
+
+      QProcess decoderProcess;
+      qDebug() << "[AFBC] Running:" << afbcDecoderPath << args;
+      decoderProcess.start(afbcDecoderPath, args);
+      if (decoderProcess.waitForFinished())
+      {
+        QString stdoutStr = decoderProcess.readAllStandardOutput();
+        QString stderrStr = decoderProcess.readAllStandardError();
+        qDebug() << "[AFBC] Exit code:" << decoderProcess.exitCode();
+        if (!stdoutStr.isEmpty())
+          qDebug() << "[AFBC] stdout:" << stdoutStr;
+        if (!stderrStr.isEmpty())
+          qDebug() << "[AFBC] stderr:" << stderrStr;
+
+        if (decoderProcess.exitCode() == 0)
+        {
+          QFile rasterFile(tempOut.fileName());
+          if (rasterFile.open(QIODevice::ReadOnly))
+          {
+            this->currentFrameRawData = rasterFile.readAll();
+            qDebug() << "[AFBC] Output raster size:" << this->currentFrameRawData.size() << "bytes";
+          }
+        }
+      }
+      else
+      {
+        qDebug() << "[AFBC] Process timed out or failed to start";
+      }
+    }
   }
 
   // The data in currentFrameRawData is now up to date. If necessary

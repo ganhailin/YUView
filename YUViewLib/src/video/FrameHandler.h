@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <common/EnumMapper.h>
 #include <common/InfoItemAndData.h>
 #include <common/SaveUi.h>
 #include <common/Typedef.h>
@@ -46,6 +47,36 @@
 
 namespace video
 {
+
+enum class FBCFormat
+{
+  Raster,
+  AFBC
+};
+
+const EnumMapper<FBCFormat, 2> FBCFormatMapper = {
+    std::make_pair(FBCFormat::Raster, "Raster"),
+    std::make_pair(FBCFormat::AFBC, "AFBC")};
+
+enum class AFBCLayout
+{
+  Block16x16_444,     // 0: 16x16 块, 4:4:4 (无子采样)
+  Block16x16_420,     // 1: 16x16 块, 4:2:0
+  Block16x16_422,     // 2: 16x16 块, 4:2:2
+  Wide32x8_444,       // 3: 32x8 宽块, 4:4:4 (平坦)
+  Wide32x8_444_16bpp, // 4: 32x8 宽块, 4:4:4 (16bpp优化)
+  Wide32x8_420,       // 5: 32x8 宽块, 4:2:0
+  Wide32x8_422,       // 6: 32x8 宽块, 4:2:2
+};
+
+const EnumMapper<AFBCLayout, 7> AFBCLayoutMapper = {
+    std::make_pair(AFBCLayout::Block16x16_444, "16x16 块, 4:4:4"),
+    std::make_pair(AFBCLayout::Block16x16_420, "16x16 块, 4:2:0"),
+    std::make_pair(AFBCLayout::Block16x16_422, "16x16 块, 4:2:2"),
+    std::make_pair(AFBCLayout::Wide32x8_444, "32x8 宽块, 4:4:4 (平坦)"),
+    std::make_pair(AFBCLayout::Wide32x8_444_16bpp, "32x8 宽块, 4:4:4 (16bpp优化)"),
+    std::make_pair(AFBCLayout::Wide32x8_420, "32x8 宽块, 4:2:0"),
+    std::make_pair(AFBCLayout::Wide32x8_422, "32x8 宽块, 4:2:2")};
 
 /* The frame handler is the base class that is able to handle single frames. The class videoHandler
  * is a child of this class and adds support for sources with more than one frame. Finally, there
@@ -135,6 +166,18 @@ public:
   virtual void savePlaylist(YUViewDomElement &root) const;
   virtual void loadPlaylist(const YUViewDomElement &root);
 
+  FBCFormat getFbcFormat() const { return fbcFormat; }
+
+  bool isAfbcCustomOptions() const { return afbcCustomOptions; }
+  bool isAfbcYuvTf() const { return afbcYuvTf; }
+  bool isAfbcSplitMode() const { return afbcSplitMode; }
+  int  getAfbcYoffset() const { return afbcYoffset; }
+  AFBCLayout getAfbcLayout() const { return afbcLayout; }
+  QString getAfbcModeSuffix() const;
+
+  // Called when the FBC format changes. Derived classes can override to invalidate caches.
+  virtual void onFbcFormatChanged() {}
+
 signals:
   // Signaled if something about the item changed. redrawNeeded is true if the handler needs to be
   // redrawn.
@@ -144,6 +187,12 @@ protected:
   QImage currentImage;
   mutable VideoFrame currentVideoFrame;
   Size   frameSize;
+  FBCFormat  fbcFormat{FBCFormat::Raster};
+  bool       afbcCustomOptions{false};
+  bool       afbcYuvTf{false};
+  bool       afbcSplitMode{false};
+  int        afbcYoffset{0};
+  AFBCLayout afbcLayout{AFBCLayout::Block16x16_444};
 
   // Get the pixel value from currentImage. Make sure that currentImage is the correct image.
   QRgb         getPixelVal(const QPoint &pos) { return getPixelVal(pos.x(), pos.y()); }
@@ -151,6 +200,15 @@ protected:
 
   // When slotVideoControlChanged is called, update the controls and return the new selected size
   Size getNewSizeFromControls();
+
+  // Check if the FBC format combo changed. Returns true if FBC format was updated.
+  bool checkFbcFormatChanged();
+
+  // Check if any AFBC option widget changed. Returns true if an option was updated.
+  bool checkAfbcOptionsChanged();
+
+  // Update the enabled state of AFBC option widgets based on current fbcFormat and afbcCustomOptions.
+  void updateAfbcOptionWidgetsEnabled();
 
   QSettings settings;
 

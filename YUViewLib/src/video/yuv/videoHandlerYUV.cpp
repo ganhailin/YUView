@@ -41,7 +41,10 @@
 #include <vector>
 
 #include <QDir>
+#include <QFile>
 #include <QPainter>
+#include <QProcess>
+#include <QTemporaryFile>
 
 #include <common/Formatting.h>
 #include <common/Functions.h>
@@ -949,6 +952,7 @@ bool convertYUV420ToRGB(const QByteArray         &sourceBuffer,
   static unsigned char *clip_buf = clp_buf + 384;
   if (!clp_buf_initialized)
     initClippingTable();
+  const auto clipIndex = [](int value) { return functions::clip(value, -384, 639); };
 
   unsigned char *restrict dst = targetBuffer;
 
@@ -997,9 +1001,9 @@ bool convertYUV420ToRGB(const QByteArray         &sourceBuffer,
         const int G_tmp = (Y_tmp + U_tmp_G + V_tmp_G) >> 16;
         const int B_tmp = (Y_tmp + U_tmp_B) >> 16;
 
-        dst[dstAddr1]     = clip_buf[B_tmp];
-        dst[dstAddr1 + 1] = clip_buf[G_tmp];
-        dst[dstAddr1 + 2] = clip_buf[R_tmp];
+        dst[dstAddr1]     = clip_buf[clipIndex(B_tmp)];
+        dst[dstAddr1 + 1] = clip_buf[clipIndex(G_tmp)];
+        dst[dstAddr1 + 2] = clip_buf[clipIndex(R_tmp)];
         dst[dstAddr1 + 3] = 255;
         dstAddr1 += 4;
       }
@@ -1011,9 +1015,9 @@ bool convertYUV420ToRGB(const QByteArray         &sourceBuffer,
         const int G_tmp = (Y_tmp + U_tmp_G + V_tmp_G) >> 16;
         const int B_tmp = (Y_tmp + U_tmp_B) >> 16;
 
-        dst[dstAddr1]     = clip_buf[B_tmp];
-        dst[dstAddr1 + 1] = clip_buf[G_tmp];
-        dst[dstAddr1 + 2] = clip_buf[R_tmp];
+        dst[dstAddr1]     = clip_buf[clipIndex(B_tmp)];
+        dst[dstAddr1 + 1] = clip_buf[clipIndex(G_tmp)];
+        dst[dstAddr1 + 2] = clip_buf[clipIndex(R_tmp)];
         dst[dstAddr1 + 3] = 255;
         dstAddr1 += 4;
       }
@@ -1025,9 +1029,9 @@ bool convertYUV420ToRGB(const QByteArray         &sourceBuffer,
         const int G_tmp = (Y_tmp + U_tmp_G + V_tmp_G) >> 16;
         const int B_tmp = (Y_tmp + U_tmp_B) >> 16;
 
-        dst[dstAddr2]     = clip_buf[B_tmp];
-        dst[dstAddr2 + 1] = clip_buf[G_tmp];
-        dst[dstAddr2 + 2] = clip_buf[R_tmp];
+        dst[dstAddr2]     = clip_buf[clipIndex(B_tmp)];
+        dst[dstAddr2 + 1] = clip_buf[clipIndex(G_tmp)];
+        dst[dstAddr2 + 2] = clip_buf[clipIndex(R_tmp)];
         dst[dstAddr2 + 3] = 255;
         dstAddr2 += 4;
       }
@@ -1039,9 +1043,9 @@ bool convertYUV420ToRGB(const QByteArray         &sourceBuffer,
         const int G_tmp = (Y_tmp + U_tmp_G + V_tmp_G) >> 16;
         const int B_tmp = (Y_tmp + U_tmp_B) >> 16;
 
-        dst[dstAddr2]     = clip_buf[B_tmp];
-        dst[dstAddr2 + 1] = clip_buf[G_tmp];
-        dst[dstAddr2 + 2] = clip_buf[R_tmp];
+        dst[dstAddr2]     = clip_buf[clipIndex(B_tmp)];
+        dst[dstAddr2 + 1] = clip_buf[clipIndex(G_tmp)];
+        dst[dstAddr2 + 2] = clip_buf[clipIndex(R_tmp)];
         dst[dstAddr2 + 3] = 255;
         dstAddr2 += 4;
       }
@@ -4062,6 +4066,89 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
   if (!loadRawYUVData(frameIndex))
     // Loading failed or it is still being performed in the background
     return;
+
+  // Decode AFBC compressed data using the external decoder tool
+  if (this->fbcFormat != FBCFormat::Raster)
+  {
+    if (!this->srcPixelFormatOriginalSaved)
+    {
+      this->srcPixelFormatOriginal      = this->srcPixelFormat;
+      this->srcPixelFormatOriginalSaved = true;
+    }
+
+    QSettings settings;
+    settings.beginGroup("RKTools");
+    QString afbcDecoderPath = settings.value("AFBCDecoderPath", "").toString();
+    settings.endGroup();
+    if (!afbcDecoderPath.isEmpty())
+    {
+      // Write raw AFBC data to a temp file
+      QTemporaryFile tempIn(QDir::temp().filePath("afbc_XXXXXX.raw"));
+      tempIn.setAutoRemove(false);
+      tempIn.open();
+      tempIn.write(this->currentFrameRawData);
+      tempIn.close();
+
+      QTemporaryFile tempOut(QDir::temp().filePath("raster_XXXXXX.raw"));
+      tempOut.setAutoRemove(false);
+      tempOut.open();
+      tempOut.close();
+
+      auto subsampling = this->srcPixelFormat.getSubsampling();
+      auto bitsPerSample = this->srcPixelFormat.getBitsPerSample();
+
+      QString subsamplingStr;
+      switch (subsampling)
+      {
+      case Subsampling::YUV_444: subsamplingStr = "444"; break;
+      case Subsampling::YUV_422: subsamplingStr = "422"; break;
+      case Subsampling::YUV_420: subsamplingStr = "420"; break;
+      case Subsampling::YUV_440: subsamplingStr = "440"; break;
+      case Subsampling::YUV_410: subsamplingStr = "410"; break;
+      case Subsampling::YUV_411: subsamplingStr = "411"; break;
+      case Subsampling::YUV_400: subsamplingStr = "400"; break;
+      default: subsamplingStr = "420"; break;
+      }
+
+      QString mode = QString("yuv%1%2%3")
+                         .arg(subsamplingStr)
+                         .arg(bitsPerSample)
+                         .arg(this->getAfbcModeSuffix());
+
+      QStringList args;
+      args << "-h" << QString::number(this->frameSize.width)+"x"+QString::number(this->frameSize.height)+"_"+mode
+           << "-i"  << tempIn.fileName()
+           << "-o" << tempOut.fileName();
+
+      QProcess decoderProcess;
+      qDebug() << "[AFBC] Running:" << afbcDecoderPath << args;
+      decoderProcess.start(afbcDecoderPath, args);
+      if (decoderProcess.waitForFinished())
+      {
+        QString stdoutStr = decoderProcess.readAllStandardOutput();
+        QString stderrStr = decoderProcess.readAllStandardError();
+        qDebug() << "[AFBC] Exit code:" << decoderProcess.exitCode();
+        if (!stdoutStr.isEmpty())
+          qDebug() << "[AFBC] stdout:" << stdoutStr;
+        if (!stderrStr.isEmpty())
+          qDebug() << "[AFBC] stderr:" << stderrStr;
+
+        if (decoderProcess.exitCode() == 0)
+        {
+          QFile rasterFile(tempOut.fileName());
+          if (rasterFile.open(QIODevice::ReadOnly))
+          {
+            this->currentFrameRawData = rasterFile.readAll();
+            qDebug() << "[AFBC] Output raster size:" << this->currentFrameRawData.size() << "bytes";
+          }
+        }
+      }
+      else
+      {
+        qDebug() << "[AFBC] Process timed out or failed to start";
+      }
+    }
+  }
 
   // The data in currentFrameRawData is now up to date. If necessary
   // convert the data to RGB.

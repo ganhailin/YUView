@@ -79,6 +79,10 @@ private slots:
   void on_pushButtonLibVVDecClearFile_clicked() { ui.lineEditLibVVDecFile->clear(); }
   void on_pushButtonFFMpegClearFile_clicked() { ui.lineEditAVFormat->clear(); ui.lineEditAVCodec->clear(); ui.lineEditAVUtil->clear(); ui.lineEditSWResample->clear(); }
 
+  // "RK Tools" tab
+  void on_pushButtonAFBCDecoderSelectFile_clicked();
+  void on_pushButtonAFBCDecoderClearFile_clicked() { ui.lineEditAFBCDecoderPath->clear(); }
+
   // Save/Load buttons
   void on_pushButtonSave_clicked();
   void on_pushButtonCancel_clicked() { reject(); }

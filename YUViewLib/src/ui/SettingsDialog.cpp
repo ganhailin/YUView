@@ -163,6 +163,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
   ui.lineEditAVUtil->setText(settings.value("FFmpeg.avutil", "").toString());
   ui.lineEditSWResample->setText(settings.value("FFmpeg.swresample", "").toString());
   settings.endGroup();
+
+  // "RK Tools" tab
+  settings.beginGroup("RKTools");
+  ui.lineEditAFBCDecoderPath->setText(settings.value("AFBCDecoderPath", "").toString());
+  settings.endGroup();
 }
 
 void SettingsDialog::initializeDefaults()
@@ -421,6 +426,24 @@ void SettingsDialog::on_pushButtonFFMpegSelectFile_clicked()
   }
 }
 
+void SettingsDialog::on_pushButtonAFBCDecoderSelectFile_clicked()
+{
+  auto currentFile = ui.lineEditAFBCDecoderPath->text();
+  QFileInfo curFile(currentFile);
+  QDir      curDir = curFile.absoluteDir();
+  if (!curDir.exists())
+    curDir = QDir::current();
+
+  QFileDialog fileDialog(this, tr("Please select the AFBC decoder executable."));
+  fileDialog.setDirectory(curDir);
+  fileDialog.setFileMode(QFileDialog::ExistingFile);
+  if (is_Q_OS_WIN)
+    fileDialog.setNameFilter(tr("Executable files (*.exe)"));
+
+  if (fileDialog.exec())
+    ui.lineEditAFBCDecoderPath->setText(fileDialog.selectedFiles()[0]);
+}
+
 void SettingsDialog::on_pushButtonSave_clicked()
 {
   // --- Save the settings ---
@@ -486,6 +509,11 @@ void SettingsDialog::on_pushButtonSave_clicked()
   settings.setValue("FFmpeg.avcodec", ui.lineEditAVCodec->text());
   settings.setValue("FFmpeg.avutil", ui.lineEditAVUtil->text());
   settings.setValue("FFmpeg.swresample", ui.lineEditSWResample->text());
+  settings.endGroup();
+
+  // "RK Tools" tab
+  settings.beginGroup("RKTools");
+  settings.setValue("AFBCDecoderPath", ui.lineEditAFBCDecoderPath->text());
   settings.endGroup();
 
   accept();

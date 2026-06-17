@@ -71,6 +71,13 @@ public:
 
   unsigned getCachingFrameSize() const override;
 
+  // When FBC format changes, invalidate raw data cache so the frame is reloaded
+  void onFbcFormatChanged() override
+  {
+    this->currentFrameRawData_frameIndex = -1;
+    this->rawData_frameIndex = -1;
+  }
+
   // Return the RGB values for the given pixel
   virtual QStringPairList getPixelValues(const QPoint &pixelPos,
                                          int           frameIdx,

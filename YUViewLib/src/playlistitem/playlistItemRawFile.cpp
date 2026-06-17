@@ -543,6 +543,28 @@ void playlistItemRawFile::loadRawData(int frameIdx)
 
   auto nrBytes = this->video->getBytesPerFrame();
 
+  if (this->video->getFbcFormat() != video::FBCFormat::Raster)
+  {
+    // For AFBC formats, read the entire file (compressed data size is unknown).
+    // Cap at 8192x8192x32bit to avoid excessive memory usage.
+    const int64_t maxAfbcSize = 8192 * 8192 * 4;
+    auto fileSize = this->dataSource.getFileSize();
+    int64_t readSize = fileSize.value_or(maxAfbcSize);
+    readSize = std::min(readSize, maxAfbcSize);
+
+    DEBUG_RAWFILE("playlistItemRawFile::loadRawData AFBC frame " << frameIdx << " reading entire file, bytes " << readSize);
+    int64_t bytesRead = this->dataSource.readBytes(this->video->rawData, 0, readSize);
+    if (bytesRead < readSize)
+    {
+      this->video->rawData.resize(readSize);
+      memset(this->video->rawData.data() + bytesRead, 0, readSize - bytesRead);
+    }
+    this->video->rawData_frameIndex = frameIdx;
+
+    DEBUG_RAWFILE("playlistItemRawFile::loadRawData Frame " << frameIdx << " loaded");
+    return;
+  }
+
   // Load the raw data for the given frameIdx from file and set it in the video
   int64_t fileStartPos;
   if (this->isY4MFile)

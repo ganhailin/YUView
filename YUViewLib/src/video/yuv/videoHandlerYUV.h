@@ -88,6 +88,13 @@ public:
 
   unsigned getCachingFrameSize() const override;
 
+  // When FBC format changes, invalidate raw data cache so the frame is reloaded
+  void onFbcFormatChanged() override
+  {
+    this->currentFrameRawData_frameIndex = -1;
+    this->rawData_frameIndex = -1;
+  }
+
   // The format is valid if the frame width/height/pixel format are set
   virtual bool isFormatValid() const override
   {
@@ -200,6 +207,9 @@ protected:
 
   // The currently selected YUV format
   PixelFormatYUV srcPixelFormat;
+  // The original YUV format before any AFBC decoding. Saved once when AFBC decoding is first used.
+  PixelFormatYUV srcPixelFormatOriginal;
+  bool srcPixelFormatOriginalSaved{false};
 
   virtual yuv_t getPixelValue(const QPoint &pixelPos) const;
 

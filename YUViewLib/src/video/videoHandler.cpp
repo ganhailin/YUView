@@ -53,6 +53,22 @@ videoHandler::videoHandler()
 
 void videoHandler::slotVideoControlChanged()
 {
+  if (checkFbcFormatChanged())
+  {
+    this->currentImageIndex = -1;
+    setCacheInvalid();
+    emit signalHandlerChanged(true, RECACHE_CLEAR);
+    return;
+  }
+
+  if (checkAfbcOptionsChanged())
+  {
+    this->currentImageIndex = -1;
+    setCacheInvalid();
+    emit signalHandlerChanged(true, RECACHE_CLEAR);
+    return;
+  }
+
   // Update the controls and get the new selected size
   auto newSize = getNewSizeFromControls();
 
