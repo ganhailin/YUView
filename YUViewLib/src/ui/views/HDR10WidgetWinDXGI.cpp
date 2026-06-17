@@ -350,11 +350,16 @@ HDR10WidgetWinDXGI::~HDR10WidgetWinDXGI()
 void HDR10WidgetWinDXGI::setFrame(const VideoFrame &frame)
 {
   const uint16_t *newData = frame.getData16bit();
-  const uint16_t *oldData = m_currentFrame.getData16bit();
+  const uint16_t *oldData =
+      m_currentFrame.is16bitGenerateFrom8bit() ? nullptr : m_currentFrame.getData16bit();
+  std::shared_ptr<QImage> newImage8 = frame.getImage8bit();
+  std::shared_ptr<QImage> oldImage8 = m_currentFrame.getImage8bit();
 
-  if (newData != oldData || frame.getSize() != m_frameSize)
+  if (newData != oldData || frame.getSize() != m_frameSize || newImage8 != oldImage8)
   {
     m_currentFrame     = frame;
+    if (!newData)
+      m_currentFrame.clear16bitBuffer();
     m_frameSize        = frame.getSize();
     m_frameNeedsUpdate = true;
     m_textureNeedsUpdate = true;
