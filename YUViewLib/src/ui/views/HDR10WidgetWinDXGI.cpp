@@ -1039,13 +1039,9 @@ void HDR10WidgetWinDXGI::drawOverlayTexture(ID3D11DeviceContext *ctx, int w, int
   // w, h are physical pixels (swap chain size)
   // drawPixelValues/drawZoomIndicator/drawPixelRulers use width()/height()
   // which are logical pixels. We scale the painter so they draw correctly.
+  // m_zoom and m_moveOffset are in logical pixels (from SplitViewWidget),
+  // and the overlay drawing functions expect logical pixels, so no DPR conversion needed.
   float dpr = (float)w / (float)qMax(1, width());
-
-  // Temporarily scale zoom and offset for physical pixel calculations
-  double savedZoom = m_zoom;
-  QPointF savedOffset = m_moveOffset;
-  m_zoom /= dpr;
-  m_moveOffset /= dpr;
 
   QImage overlayImage(w, h, QImage::Format_RGBA8888);
   overlayImage.fill(Qt::transparent);
@@ -1058,9 +1054,6 @@ void HDR10WidgetWinDXGI::drawOverlayTexture(ID3D11DeviceContext *ctx, int w, int
     drawZoomIndicator(&painter);
     drawPixelRulers(&painter);
   }
-
-  m_zoom = savedZoom;
-  m_moveOffset = savedOffset;
 
   // Check if overlay has any non-transparent pixels
   bool hasContent = false;
