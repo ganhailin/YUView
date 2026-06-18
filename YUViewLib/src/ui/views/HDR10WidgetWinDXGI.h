@@ -51,6 +51,7 @@
 #include <QWidget>
 #include <QTimer>
 #include <QPainter>
+#include <QHideEvent>
 #include <memory>
 #include <vector>
 
@@ -119,6 +120,7 @@ protected:
   void resizeEvent(QResizeEvent *event) override;
   void paintEvent(QPaintEvent *event) override;
   void showEvent(QShowEvent *event) override;
+  void hideEvent(QHideEvent *event) override;
 
 private:
   void initD3D();

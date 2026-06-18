@@ -241,6 +241,7 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
     else
     {
       hdr10WidgetWin->hide();
+      hdr10WidgetWin->lower();
     }
 #endif
 
@@ -294,10 +295,16 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
 #endif
 #ifdef Q_OS_WIN
     if (hdr10WidgetWin)
+    {
       hdr10WidgetWin->hide();
+      hdr10WidgetWin->lower();
+    }
 #endif
     if (hdr10Widget)
+    {
       hdr10Widget->hide();
+      hdr10Widget->lower();
+    }
   }
 
   if (callUpdate)
@@ -635,6 +642,7 @@ void splitViewWidget::paintEvent(QPaintEvent *)
           hdr10Widget->setFrameHandler(frameHandler);
         }
         hdr10Widget->setShowRawData(drawRawValues);
+        useHDRWidget = true;
       }
       else if (!useHDRWidget)
       {
@@ -1833,6 +1841,13 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
 #ifdef Q_OS_MAC
     if (hdr10WidgetMacEDR)
       hdr10WidgetMacEDR->hide();
+#endif
+#ifdef Q_OS_WIN
+    if (hdr10WidgetWin)
+    {
+      hdr10WidgetWin->hide();
+      hdr10WidgetWin->lower();
+    }
 #endif
     return;
   }

@@ -408,7 +408,8 @@ void HDR10WidgetWinDXGI::paintEvent(QPaintEvent *)
     initD3D();
     if (m_initialized)
     {
-      m_renderTimer->start(16);
+      if (!m_renderTimer->isActive())
+        m_renderTimer->start(16);
       updateHDRStatus();
     }
   }
@@ -422,11 +423,20 @@ void HDR10WidgetWinDXGI::showEvent(QShowEvent *event)
   {
     initD3D();
     if (m_initialized)
-    {
-      m_renderTimer->start(16);
       updateHDRStatus();
-    }
   }
+
+  if (m_initialized && !m_renderTimer->isActive())
+    m_renderTimer->start(16);
+}
+
+void HDR10WidgetWinDXGI::hideEvent(QHideEvent *event)
+{
+  QWidget::hideEvent(event);
+
+  if (m_renderTimer->isActive())
+    m_renderTimer->stop();
+  m_frameNeedsUpdate = false;
 }
 
 void HDR10WidgetWinDXGI::initD3D()
@@ -659,6 +669,9 @@ void HDR10WidgetWinDXGI::updateTexture()
 
 void HDR10WidgetWinDXGI::render()
 {
+  if (!isVisible())
+    return;
+
   if (!m_initialized || !m_swapChain)
   {
     qWarning() << "[HDR10WidgetWinDXGI] render: not initialized";
