@@ -112,7 +112,11 @@ playlistItemRawFile::playlistItemRawFile(const QString &rawFilePath,
     this->rawFormat = video::RawFormat::RGB;
   }
   else
-    Q_ASSERT_X(false, Q_FUNC_INFO, "No video handler for the raw file format found.");
+  {
+    // Unknown extension - can't determine video handler
+    this->setError("Unknown raw file format. Cannot determine video handler.");
+    return;
+  }
 
   auto pixelFormatFromMemory = itemMemoryHandler::itemMemoryGetFormat(rawFilePath);
   if (ext == "y4m")
@@ -132,7 +136,7 @@ playlistItemRawFile::playlistItemRawFile(const QString &rawFilePath,
     // Try to get the frame format from the file name. The FileSource can guess this.
     setFormatFromFileName();
 
-    if (!this->video->isFormatValid())
+    if (this->video && !this->video->isFormatValid())
     {
       // Load 24883200 bytes from the input and try to get the format from the correlation.
       QByteArray rawData;
