@@ -176,24 +176,24 @@ float3 applyEOTF(float3 coded)
 
 // ── Color gamut conversion matrices ────────────────────────────────
 
-// BT.2020 → BT.709 (scRGB native primaries)
+// BT.2020 → BT.709 (scRGB native primaries, via XYZ D65)
 static const float3x3 BT2020toBT709 = {
-     1.6605, -0.5876, -0.0728,
-    -0.1246,  1.1329, -0.0083,
-    -0.0182, -0.1006,  1.1187
+     1.6604900368e+00f, -5.8763847956e-01f, -7.2851557227e-02f,
+    -1.2455039399e-01f,  1.1328984194e+00f, -8.3480253896e-03f,
+    -1.8151044561e-02f, -1.0057861035e-01f,  1.1187296549e+00f
 };
 
-// Display P3 → BT.709 (scRGB native primaries)
+// Display P3 → BT.709 (scRGB native primaries, via XYZ D65)
 static const float3x3 P3toBT709 = {
-     1.2249, -0.2249,  0.0000,
-    -0.0421,  1.0421,  0.0000,
-    -0.0197, -0.0786,  1.0983
+     1.2249389281e+00f, -2.2493772528e-01f, -2.2415925081e-06f,
+    -4.2055920309e-02f,  1.0420564505e+00f,  1.3042267039e-06f,
+    -1.9637885940e-02f, -7.8636645004e-02f,  1.0982732700e+00f
 };
 
 float3 applyGamutConversion(float3 linColor)
 {
-    if (colorGamut == 0) return mul(linColor, BT2020toBT709);  // BT.2020 → BT.709
-    if (colorGamut == 2) return mul(linColor, P3toBT709);      // P3 → BT.709
+    if (colorGamut == 0) return mul(BT2020toBT709, linColor);  // BT.2020 → BT.709
+    if (colorGamut == 2) return mul(P3toBT709, linColor);      // P3 → BT.709
     return linColor;                                            // BT.709 → passthrough
 }
 
@@ -589,6 +589,7 @@ void HDR10WidgetWinDXGI::updateTexture()
   // Get 16-bit data from VideoFrame
   if (!m_currentFrame.getData16bit())
   {
+    qWarning() << "[HDR10WidgetWinDXGI] updateTexture: no 16-bit data, trying to generate from 8-bit";
     // No 16-bit data available, try to generate from 8-bit
     const_cast<VideoFrame &>(m_currentFrame).generate16bitBuffer();
     m_sourceBitDepth = 8;
@@ -1146,7 +1147,7 @@ void HDR10WidgetWinDXGI::updateHDRStatus()
   if (!m_swapChain)
     return;
   auto caps = m_swapChain->getCapabilities();
-  emit hdrStatusChanged(caps.hdrActive, caps.maxLuminance);
+  emit hdrStatusChanged(caps.hdrActive, caps.maxLuminance, caps.sdrWhiteNits);
 }
 
 } // namespace video

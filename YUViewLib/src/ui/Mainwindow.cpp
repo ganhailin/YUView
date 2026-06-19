@@ -46,6 +46,7 @@
 #include <playlistitem/playlistItems.h>
 #include <ui/Mainwindow_performanceTestDialog.h>
 #include <ui/SettingsDialog.h>
+#include <ui/HDRSettingsDock.h>
 #include <ui/widgets/PlaylistTreeWidget.h>
 
 MainWindow::MainWindow(bool useAlternativeSources, QWidget *parent) : QMainWindow(parent)
@@ -166,6 +167,12 @@ MainWindow::MainWindow(bool useAlternativeSources, QWidget *parent) : QMainWindo
   ui.displaySplitView->setPlaylistTreeWidget(ui.playlistTreeWidget);
   ui.displaySplitView->setVideoCache(this->cache.get());
   ui.cachingInfoWidget->setPlaylistAndCache(ui.playlistTreeWidget, this->cache.get());
+
+  // Connect HDR settings dock to split view
+  ui.hdrSettingsWidget->setSplitViewWidget(ui.displaySplitView);
+  connect(ui.displaySplitView, &splitViewWidget::hdrStatusChanged,
+          ui.hdrSettingsWidget, &HDRSettingsDock::setHDRInfo);
+
   separateViewWindow.splitView.setPlaybackController(ui.playbackController);
   separateViewWindow.splitView.setPlaylistTreeWidget(ui.playlistTreeWidget);
 
@@ -377,6 +384,7 @@ void MainWindow::createMenusAndActions()
   addDockViewAction(ui.cachingInfoDock, "Show Caching Info");
   viewMenu->addSeparator();
   addDockViewAction(ui.playbackControllerDock, "Show Playback &Controls", Qt::CTRL | Qt::Key_D);
+  addDockViewAction(ui.hdrSettingsDock, "Show &HDR / Color Settings", Qt::CTRL | Qt::Key_H);
 
   auto splitViewMenu = viewMenu->addMenu("Split View");
   ui.displaySplitView->addMenuActions(splitViewMenu);

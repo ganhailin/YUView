@@ -114,7 +114,7 @@ public:
   void drawPixelRulers(QPainter *painter);
 
 signals:
-  void hdrStatusChanged(bool active, float maxNits);
+  void hdrStatusChanged(bool active, float maxNits, float sdrWhiteNits);
 
 protected:
   void resizeEvent(QResizeEvent *event) override;

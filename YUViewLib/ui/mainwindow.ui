@@ -262,6 +262,15 @@
    </attribute>
    <widget class="VideoCacheInfoWidget" name="cachingInfoWidget"/>
   </widget>
+  <widget class="QDockWidget" name="hdrSettingsDock">
+   <property name="windowTitle">
+    <string>HDR / Color Settings</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>8</number>
+   </attribute>
+   <widget class="HDRSettingsDock" name="hdrSettingsWidget"/>
+  </widget>
   <action name="actionOpen">
    <property name="text">
     <string>Open...</string>
@@ -310,6 +319,11 @@
    <extends>QWidget</extends>
    <header>ui/widgets/BitstreamAnalysisWidget.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>HDRSettingsDock</class>
+   <extends>QWidget</extends>
+   <header>ui/HDRSettingsDock.h</header>
   </customwidget>
  </customwidgets>
  <tabstops>

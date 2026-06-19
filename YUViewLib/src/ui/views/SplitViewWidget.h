@@ -135,6 +135,9 @@ public:
   // Check if HDR rendering is supported by the current OpenGL context
   bool isHDRSupported() const;
 
+  // Apply color settings to active HDR widgets (without changing HDR mode)
+  void applyColorSettingsToWidgets();
+
   // Test the drawing speed with the currently selected item
   void testDrawingSpeed();
 
@@ -149,6 +152,9 @@ signals:
   void signalShowSeparateWindow(bool show);
 
   void signalToggleFullScreen();
+
+  // HDR status changed (active, max nits, SDR white nits)
+  void hdrStatusChanged(bool active, float maxNits, float sdrWhiteNits);
 
 public slots:
 
@@ -177,11 +183,6 @@ private slots:
   void toggleSeparateWindow(bool checked);
   void toggleSeparateWindowPlaybackBoth(bool){};
   void toggleFullScreen(bool checked);
-  void toggleHDRRendering(bool checked);
-  void toggleHDRDithering(bool checked);
-  void toggleEDRMode(bool checked);
-  void toggleDXGIMode(bool checked);
-  void showEDRSettings(bool checked = false);
 
 protected:
   // Set the widget to the given view mode
@@ -230,7 +231,6 @@ protected:
   QAction                       actionHDRDithering;
   QAction                       actionEDRMode;          // Toggle Metal EDR mode on macOS
   QAction                       actionDXGIMode;         // Toggle DXGI HDR mode on Windows
-  QAction                       actionEDRSettings;      // Open EDR settings dialog on macOS
 
   void         updateMouseTracking();
   virtual bool updateMouseCursor(const QPoint &srcMousePos) override;
