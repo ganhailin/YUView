@@ -48,14 +48,14 @@ FileSourceAnnexBFile::FileSourceAnnexBFile()
   this->fileBuffer.resize(BUFFERSIZE);
 }
 
-FileSourceAnnexBFile::FileSourceAnnexBFile(const std::filesystem::path &filePath)
+FileSourceAnnexBFile::FileSourceAnnexBFile(const std::string &filePath)
     : FileSourceAnnexBFile()
 {
   this->openFile(filePath);
 }
 
 // Open the file and fill the read buffer.
-bool FileSourceAnnexBFile::openFile(const std::filesystem::path &fileName)
+bool FileSourceAnnexBFile::openFile(const std::string &fileName)
 {
   DEBUG_ANNEXBFILE("FileSourceAnnexBFile::openFile fileName " << fileName);
 

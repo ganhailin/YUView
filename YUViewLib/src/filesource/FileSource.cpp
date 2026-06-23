@@ -56,20 +56,21 @@ FileSource::FileSource()
           &FileSource::fileSystemWatcherFileChanged);
 }
 
-bool FileSource::openFile(const std::filesystem::path &filePath)
+bool FileSource::openFile(const std::string &filePath)
 {
-  if (!std::filesystem::is_regular_file(filePath))
+  const auto fsPath = stringToPath(filePath);
+  if (!std::filesystem::is_regular_file(fsPath))
     return false;
 
   if (this->isFileOpened && this->srcFile.isOpen())
     this->srcFile.close();
 
-  this->srcFile.setFileName(QString::fromStdString(filePath.string()));
+  this->srcFile.setFileName(pathToQString(fsPath));
   this->isFileOpened = this->srcFile.open(QIODevice::ReadOnly);
   if (!this->isFileOpened)
     return false;
 
-  this->fullFilePath = filePath;
+  this->fullFilePath = fsPath;
 
   this->updateFileWatchSetting();
   this->fileChanged = false;
@@ -103,11 +104,11 @@ std::vector<InfoItem> FileSource::getFileInfoList() const
 
   // For now we still use the QFileInfo. There is no easy cross platform formatting
   // for the std::filesystem::file_time_type. This is added in C++ 20.
-  QFileInfo fileInfo(QString::fromStdString(this->fullFilePath.string()));
+  QFileInfo fileInfo(pathToQString(this->fullFilePath));
 
   std::vector<InfoItem> infoList;
 
-  infoList.emplace_back("File Path", this->fullFilePath.string());
+  infoList.emplace_back("File Path", pathToQString(this->fullFilePath).toStdString());
 #if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
   const auto createdtime = this->fileInfo.created().toString("yyyy-MM-dd hh:mm:ss");
 #else
@@ -141,7 +142,7 @@ std::optional<int64_t> FileSource::getFileSize() const
 
 std::string FileSource::getAbsoluteFilePath() const
 {
-  return this->isFileOpened ? this->fullFilePath.string() : "";
+  return this->isFileOpened ? pathToQString(this->fullFilePath).toStdString() : "";
 }
 
 bool FileSource::getAndResetFileChangedFlag()
@@ -157,9 +158,9 @@ void FileSource::updateFileWatchSetting()
   // The addPath/removePath functions will do nothing if called twice for the same file.
   QSettings settings;
   if (settings.value("WatchFiles", true).toBool())
-    fileWatcher.addPath(QString::fromStdString(this->fullFilePath.string()));
+    fileWatcher.addPath(pathToQString(this->fullFilePath));
   else
-    fileWatcher.removePath(QString::fromStdString(this->fullFilePath.string()));
+    fileWatcher.removePath(pathToQString(this->fullFilePath));
 }
 
 void FileSource::clearFileCache()
@@ -180,7 +181,7 @@ void FileSource::clearFileCache()
       CreateFile(file, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
   CloseHandle(hFile);
 
-  this->srcFile.setFileName(this->fullFilePath);
+  this->srcFile.setFileName(pathToQString(this->fullFilePath));
   this->srcFile.open(QIODevice::ReadOnly);
 #endif
 }

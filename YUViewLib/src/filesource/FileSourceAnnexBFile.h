@@ -47,9 +47,9 @@ class FileSourceAnnexBFile : public FileSource
 
 public:
   FileSourceAnnexBFile();
-  FileSourceAnnexBFile(const std::filesystem::path &filePath);
+  FileSourceAnnexBFile(const std::string &filePath);
 
-  bool openFile(const std::filesystem::path &filePath) override;
+  bool openFile(const std::string &filePath) override;
 
   // Is the file at the end?
   bool atEnd() const override;

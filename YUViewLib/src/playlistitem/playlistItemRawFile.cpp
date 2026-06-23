@@ -83,7 +83,7 @@ playlistItemRawFile::playlistItemRawFile(const QString &rawFilePath,
   this->prop.isFileSource          = true;
   this->prop.propertiesWidgetTitle = "Raw File Properties";
 
-  this->dataSource.openFile(std::filesystem::path(rawFilePath.toStdString()));
+  this->dataSource.openFile(rawFilePath.toStdString());
 
   if (!this->dataSource.isOk())
   {
@@ -178,7 +178,7 @@ playlistItemRawFile::playlistItemRawFile(const QString &rawFilePath,
 
 void playlistItemRawFile::updateStartEndRange()
 {
-  if (!this->dataSource.isOk() || !this->video->isFormatValid())
+  if (!this->dataSource.isOk() || !this->video || !this->video->isFormatValid())
   {
     this->prop.startEndRange = indexRange(-1, -1);
     return;
@@ -208,6 +208,13 @@ InfoData playlistItemRawFile::getInfo() const
   // At first append the file information part (path, date created, file size...)
   for (const auto &infoItem : this->dataSource.getFileInfoList())
     info.items.append(infoItem);
+
+  if (!this->video)
+  {
+    // The video handler could not be created (e.g. unknown format or file open error).
+    // Just return the file info without dereferencing the null pointer.
+    return info;
+  }
 
   const auto nrFrames =
       (this->properties().startEndRange.second - this->properties().startEndRange.first + 1);
@@ -542,7 +549,7 @@ playlistItemRawFile *playlistItemRawFile::newplaylistItemRawFile(const YUViewDom
 
 void playlistItemRawFile::loadRawData(int frameIdx)
 {
-  if (!this->video->isFormatValid())
+  if (!this->video || !this->video->isFormatValid())
     return;
 
   auto nrBytes = this->video->getBytesPerFrame();
@@ -627,6 +634,9 @@ void playlistItemRawFile::reloadItemSource()
   this->dataSource.openFile(this->properties().name.toStdString());
   if (!this->dataSource.isOk())
     // Opening the file failed.
+    return;
+
+  if (!this->video)
     return;
 
   this->video->invalidateAllBuffers();

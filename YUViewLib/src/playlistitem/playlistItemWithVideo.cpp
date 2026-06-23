@@ -97,6 +97,9 @@ void playlistItemWithVideo::loadFrame(int  frameIdx,
                                       bool loadRawData,
                                       bool emitSignals)
 {
+  if (unresolvableError || !video)
+    return;
+
   auto state = video->needsLoading(frameIdx, loadRawData);
 
   if (state == ItemLoadingState::LoadingNeeded)

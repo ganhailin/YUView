@@ -606,7 +606,7 @@ void postProcessImage(dec::Targa::Image &image, const Header &header)
 
 std::optional<dec::Targa::Image> dec::Targa::loadTgaFromFile(std::string filename)
 {
-  std::ifstream tgaFile(filename, std::ios::binary);
+  std::ifstream tgaFile(stringToPath(filename), std::ios::binary);
 
   auto header = readHeader(tgaFile);
   if (!header)

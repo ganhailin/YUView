@@ -41,6 +41,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <filesystem>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -303,3 +304,28 @@ template <typename... Args> struct QOverload : QConstOverload<Args...>, QNonCons
   }
 };
 #endif
+
+/// Convert a UTF-8 std::string to std::filesystem::path in a Unicode-safe manner.
+///
+/// On Windows, std::filesystem::path(const std::string&) interprets the string
+/// as the system code page (e.g. GBK/CP936), not UTF-8. This causes file
+/// operations to fail for paths containing non-ASCII characters. We work around
+/// this by going through std::wstring on Windows.
+inline std::filesystem::path stringToPath(const std::string &str)
+{
+#ifdef Q_OS_WIN
+  return std::filesystem::path(QString::fromStdString(str).toStdWString());
+#else
+  return std::filesystem::path(str);
+#endif
+}
+
+/// Convert a std::filesystem::path to a QString in a Unicode-safe manner.
+inline QString pathToQString(const std::filesystem::path &path)
+{
+#ifdef Q_OS_WIN
+  return QString::fromStdWString(path.wstring());
+#else
+  return QString::fromStdString(path.string());
+#endif
+}

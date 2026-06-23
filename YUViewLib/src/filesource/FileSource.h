@@ -72,7 +72,7 @@ class FileSource : public QObject
 public:
   FileSource();
 
-  virtual bool openFile(const std::filesystem::path &filePath);
+  virtual bool openFile(const std::string &filePath);
 
   virtual std::vector<InfoItem> getFileInfoList() const;
   std::optional<int64_t>        getFileSize() const;

@@ -283,7 +283,7 @@ bool ParserAnnexB::parseAnnexBFile(std::unique_ptr<FileSourceAnnexBFile> &file, 
 bool ParserAnnexB::runParsingOfFile(const std::filesystem::path &compressedFilePath)
 {
   DEBUG_ANNEXB("playlistItemCompressedVideo::runParsingOfFile");
-  auto file = std::make_unique<FileSourceAnnexBFile>(compressedFilePath);
+  auto file = std::make_unique<FileSourceAnnexBFile>(pathToQString(compressedFilePath).toStdString());
   return this->parseAnnexBFile(file);
 }
 
