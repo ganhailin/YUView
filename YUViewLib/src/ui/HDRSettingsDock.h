@@ -66,7 +66,8 @@ public:
   bool ditheringEnabled() const;
 
   // Set HDR info label
-  void setHDRInfo(bool hdrActive, float maxNits, float sdrWhiteNits);
+  void setHDRInfo(bool hdrActive, bool systemHandlesTonemapping,
+                  float maxNits, float sdrWhiteNits);
 
 signals:
   void settingsChanged();

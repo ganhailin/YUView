@@ -68,11 +68,15 @@ public:
   void resize(int width, int height);
 
   bool isHDRActive() const;
+  bool isACMActive() const;
+  bool systemHandlesTonemapping() const;
 
   struct HDRCapabilities
   {
     bool   hdrSupported{false};
     bool   hdrActive{false};
+    bool   acmActive{false};                  // ACM (Advanced Color Management) SDR mode
+    bool   systemHandlesTonemapping{false};   // true if hdrActive || acmActive — no Reinhard needed
     float  maxLuminance{0.0f};
     float  minLuminance{0.0f};
     float  maxFullFrameLuminance{0.0f};
@@ -80,6 +84,9 @@ public:
     QSize  displaySize;
   };
   HDRCapabilities getCapabilities() const;
+
+  /// Re-run HDR/ACM capability detection (call after WM_DISPLAYCHANGE).
+  void refreshCapabilities();
 
   void beginFrame(float clearR = 0.0f, float clearG = 0.0f, float clearB = 0.0f, float clearA = 1.0f);
   void endFrame(bool vsync = true);

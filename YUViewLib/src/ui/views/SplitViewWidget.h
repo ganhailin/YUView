@@ -153,8 +153,9 @@ signals:
 
   void signalToggleFullScreen();
 
-  // HDR status changed (active, max nits, SDR white nits)
-  void hdrStatusChanged(bool active, float maxNits, float sdrWhiteNits);
+  // HDR status changed (hdrActive, systemHandlesTonemapping, max nits, SDR white nits)
+  void hdrStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
+                        float maxNits, float sdrWhiteNits);
 
 public slots:
 

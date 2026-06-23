@@ -237,15 +237,19 @@ void HDRSettingsDock::onAnySettingChanged()
   applySettings();
 }
 
-void HDRSettingsDock::setHDRInfo(bool hdrActive, float maxNits, float sdrWhiteNits)
+void HDRSettingsDock::setHDRInfo(bool hdrActive, bool systemHandlesTonemapping,
+                                 float maxNits, float sdrWhiteNits)
 {
   QString info;
   if (hdrActive)
     info = QString("HDR: Active | Max: %1 nits | SDR White: %2 nits")
                .arg(maxNits, 0, 'f', 0)
                .arg(sdrWhiteNits, 0, 'f', 0);
+  else if (systemHandlesTonemapping)
+    info = QString("SDR + ACM | System tonemapping | SDR White: %1 nits")
+               .arg(sdrWhiteNits, 0, 'f', 0);
   else
-    info = "HDR: Inactive (SDR mode)";
+    info = "SDR (no ACM) | App tonemapping";
   m_labelHDRInfo->setText(info);
 }
 

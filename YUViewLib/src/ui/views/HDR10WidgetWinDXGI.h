@@ -114,13 +114,15 @@ public:
   void drawPixelRulers(QPainter *painter);
 
 signals:
-  void hdrStatusChanged(bool active, float maxNits, float sdrWhiteNits);
+  void hdrStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
+                        float maxNits, float sdrWhiteNits);
 
 protected:
   void resizeEvent(QResizeEvent *event) override;
   void paintEvent(QPaintEvent *event) override;
   void showEvent(QShowEvent *event) override;
   void hideEvent(QHideEvent *event) override;
+  bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 
 private:
   void initD3D();
@@ -184,6 +186,10 @@ private:
   QString       m_rendererInfo;
   QTimer       *m_renderTimer{nullptr};
   int           m_frameCount{0};
+
+  // ── HDR/ACM 状态追踪 (用于 WM_DISPLAYCHANGE 去重) ──
+  bool m_lastHdrActive{false};
+  bool m_lastSystemTonemapping{false};
 };
 
 } // namespace video

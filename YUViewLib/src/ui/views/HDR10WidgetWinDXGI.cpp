@@ -40,6 +40,7 @@
 #include <QSettings>
 #include <QWindow>
 #include <d3dcompiler.h>
+#include <windowsx.h>
 
 #include <video/yuv/videoHandlerYUV.h>
 
@@ -95,14 +96,15 @@ SamplerState texSampler : register(s0);
 
 cbuffer Constants : register(b0)
 {
-    int   eotf;              // HDR10_EOTF enum: 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
-    int   colorGamut;        // HDR10_ColorGamut enum: 0=BT2020, 1=BT709, 2=P3
-    float gammaValue;        // Gamma exponent (only when eotf=2)
-    float diffuseWhiteNits;  // Diffuse white reference (nits) from user settings
-    float hdrBrightness;     // HDR brightness multiplier
-    float sdrWhiteNits;      // Windows system SDR white level in nits (scRGB 1.0 = this)
-    float hdrActive;         // 1.0 if HDR active
-    float debugOutput;       // 0=normal, 1=raw texture, 2=raw*10, 3=after EOTF
+    int   eotf;                    // HDR10_EOTF enum: 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
+    int   colorGamut;              // HDR10_ColorGamut enum: 0=BT2020, 1=BT709, 2=P3
+    float gammaValue;              // Gamma exponent (only when eotf=2)
+    float diffuseWhiteNits;        // Diffuse white reference (nits) from user settings
+    float hdrBrightness;           // HDR brightness multiplier
+    float sdrWhiteNits;            // Windows system SDR white level in nits (scRGB 1.0 = this)
+    float hdrActive;               // 1.0 if HDR active
+    float systemHandlesTonemapping;// 1.0 if system (HDR or ACM) does tonemapping — skip Reinhard
+    float debugOutput;             // 0=normal, 1=raw texture, 2=raw*10, 3=after EOTF
 };
 
 struct PS_INPUT
@@ -251,8 +253,8 @@ float4 main(PS_INPUT input) : SV_TARGET
     // Apply user brightness adjustment
     output *= hdrBrightness;
 
-    // If display is SDR, tone-map down
-    if (hdrActive < 0.5f)
+    // If system is NOT handling tonemapping (SDR without ACM), apply Reinhard
+    if (systemHandlesTonemapping < 0.5f)
     {
         float luminance = dot(output, float3(0.2126f, 0.7152f, 0.0722f));
         float mappedLum = luminance / (1.0f + luminance);
@@ -311,8 +313,9 @@ struct ConstantBuffer
   float gammaValue;
   float diffuseWhiteNits;
   float hdrBrightness;
-  float sdrWhiteNits;    // Windows system SDR white level (scRGB 1.0 = this many nits)
+  float sdrWhiteNits;              // Windows system SDR white level (scRGB 1.0 = this many nits)
   float hdrActive;
+  float systemHandlesTonemapping;  // 1.0 if system (HDR or ACM) does tonemapping
   float debugOutput;
 };
 
@@ -695,14 +698,15 @@ void HDR10WidgetWinDXGI::render()
   // ── Update pixel shader constant buffer (register b0) ────────────
 
   ConstantBuffer cb;
-  cb.eotf             = static_cast<int>(m_eotf);
-  cb.colorGamut       = static_cast<int>(m_colorGamut);
-  cb.gammaValue       = m_gammaValue;
-  cb.diffuseWhiteNits = m_diffuseWhiteNits;
-  cb.hdrBrightness    = m_hdrBrightness;
-  cb.sdrWhiteNits     = caps.sdrWhiteNits;
-  cb.hdrActive        = caps.hdrActive ? 1.0f : 0.0f;
-  cb.debugOutput      = m_debugOutput;
+  cb.eotf                     = static_cast<int>(m_eotf);
+  cb.colorGamut               = static_cast<int>(m_colorGamut);
+  cb.gammaValue               = m_gammaValue;
+  cb.diffuseWhiteNits         = m_diffuseWhiteNits;
+  cb.hdrBrightness            = m_hdrBrightness;
+  cb.sdrWhiteNits             = caps.sdrWhiteNits;
+  cb.hdrActive                = caps.hdrActive ? 1.0f : 0.0f;
+  cb.systemHandlesTonemapping = caps.systemHandlesTonemapping ? 1.0f : 0.0f;
+  cb.debugOutput              = m_debugOutput;
 
   D3D11_MAPPED_SUBRESOURCE mapped;
   if (SUCCEEDED(ctx->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
@@ -1147,7 +1151,46 @@ void HDR10WidgetWinDXGI::updateHDRStatus()
   if (!m_swapChain)
     return;
   auto caps = m_swapChain->getCapabilities();
-  emit hdrStatusChanged(caps.hdrActive, caps.maxLuminance, caps.sdrWhiteNits);
+
+  // Only emit if something actually changed (avoid redundant signal storms)
+  if (caps.hdrActive == m_lastHdrActive &&
+      caps.systemHandlesTonemapping == m_lastSystemTonemapping)
+    return;
+
+  m_lastHdrActive = caps.hdrActive;
+  m_lastSystemTonemapping = caps.systemHandlesTonemapping;
+
+  qInfo() << "[HDR10WidgetWinDXGI] HDR:" << caps.hdrActive
+          << "ACM:" << caps.acmActive
+          << "systemTonemap:" << caps.systemHandlesTonemapping
+          << "maxNits:" << caps.maxLuminance
+          << "sdrWhite:" << caps.sdrWhiteNits;
+
+  emit hdrStatusChanged(caps.hdrActive, caps.systemHandlesTonemapping,
+                        caps.maxLuminance, caps.sdrWhiteNits);
+}
+
+bool HDR10WidgetWinDXGI::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+{
+  if (eventType == "windows_generic_MSG" || eventType == "windows_dispatcher_MSG")
+  {
+    MSG *msg = reinterpret_cast<MSG *>(message);
+    if (msg->message == WM_DISPLAYCHANGE)
+    {
+      // Display configuration changed: HDR toggle, ACM toggle, monitor connect/disconnect.
+      // Delay the re-detection to avoid reentering DXGI during message processing.
+      QTimer::singleShot(100, this, [this]() {
+        if (!m_swapChain)
+          return;
+        m_swapChain->refreshCapabilities();
+        updateHDRStatus();
+        // Force re-render with updated tonemapping state
+        m_frameNeedsUpdate = true;
+        update();
+      });
+    }
+  }
+  return QWidget::nativeEvent(eventType, message, result);
 }
 
 } // namespace video

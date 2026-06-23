@@ -105,6 +105,21 @@ bool DXGISwapChain::isHDRActive() const
   return m_caps.hdrActive;
 }
 
+bool DXGISwapChain::isACMActive() const
+{
+  return m_caps.acmActive;
+}
+
+bool DXGISwapChain::systemHandlesTonemapping() const
+{
+  return m_caps.systemHandlesTonemapping;
+}
+
+void DXGISwapChain::refreshCapabilities()
+{
+  detectHDRCapabilities();
+}
+
 DXGISwapChain::HDRCapabilities DXGISwapChain::getCapabilities() const
 {
   return m_caps;
@@ -278,7 +293,6 @@ bool DXGISwapChain::detectHDRCapabilities()
       m_caps.maxLuminance = desc1.MaxLuminance;
       m_caps.minLuminance = desc1.MinLuminance;
       m_caps.maxFullFrameLuminance = desc1.MaxFullFrameLuminance;
-
     }
     else
     {
@@ -289,6 +303,24 @@ bool DXGISwapChain::detectHDRCapabilities()
   {
     qWarning() << "[DXGISwapChain] IDXGIOutput6 not available, HDR detection not supported";
   }
+
+  // ── Detect ACM (Advanced Color Management) SDR mode ──
+  // When ACM is active in SDR mode, Windows also performs automatic color
+  // management and tonemapping (like the macOS compositor). We should NOT
+  // apply our own Reinhard tonemapping in this case.
+  //
+  // Detection heuristic: In SDR mode (hdrActive == false), if IDXGIOutput6
+  // reports MaxLuminance > 80 nits, ACM is likely active. Without ACM, SDR
+  // mode typically reports MaxLuminance of 0 or 80.
+  m_caps.acmActive = (!m_caps.hdrActive && m_caps.maxLuminance > 80.0f);
+
+  // System handles tonemapping when HDR is active OR ACM SDR is active
+  m_caps.systemHandlesTonemapping = m_caps.hdrActive || m_caps.acmActive;
+
+  qInfo() << "[DXGISwapChain] HDR:" << m_caps.hdrActive
+          << "ACM:" << m_caps.acmActive
+          << "systemTonemap:" << m_caps.systemHandlesTonemapping
+          << "maxLum:" << m_caps.maxLuminance;
 
   // ── Get Windows SDR white level (system-wide HDR brightness slider) ──
   // Uses DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL (type 11).

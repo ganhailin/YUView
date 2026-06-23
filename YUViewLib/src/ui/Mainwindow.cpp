@@ -918,7 +918,9 @@ void MainWindow::showFileOpenDialog()
   QFileDialog openDialog(this);
   openDialog.setDirectory(settings.value("lastFilePath").toString());
   openDialog.setFileMode(QFileDialog::ExistingFiles);
+  filters.append("All Files (*.*)");
   openDialog.setNameFilters(filters);
+  openDialog.selectNameFilter("All Files (*.*)");
 
   QStringList fileNames;
   if (openDialog.exec())
