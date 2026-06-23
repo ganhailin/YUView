@@ -347,6 +347,18 @@ HDR10WidgetWinDXGI::HDR10WidgetWinDXGI(QWidget *parent)
       render();
   });
 
+  // Poll for HDR/ACM state changes every 2 seconds.
+  // WM_DISPLAYCHANGE only fires on resolution/bpp changes, NOT on ACM toggle,
+  // so we need polling to detect ACM on/off or HDR on/off transitions.
+  m_hdrPollTimer = new QTimer(this);
+  connect(m_hdrPollTimer, &QTimer::timeout, this, [this]() {
+    if (m_swapChain)
+    {
+      m_swapChain->refreshCapabilities();
+      updateHDRStatus();
+    }
+  });
+
   // Normal rendering mode
   m_debugOutput = 0.0f;
 }
@@ -354,6 +366,8 @@ HDR10WidgetWinDXGI::HDR10WidgetWinDXGI(QWidget *parent)
 HDR10WidgetWinDXGI::~HDR10WidgetWinDXGI()
 {
   m_renderTimer->stop();
+  if (m_hdrPollTimer)
+    m_hdrPollTimer->stop();
 }
 
 void HDR10WidgetWinDXGI::setFrame(const VideoFrame &frame)
@@ -419,6 +433,8 @@ void HDR10WidgetWinDXGI::paintEvent(QPaintEvent *)
     {
       if (!m_renderTimer->isActive())
         m_renderTimer->start(16);
+      if (m_hdrPollTimer && !m_hdrPollTimer->isActive())
+        m_hdrPollTimer->start(2000);
       updateHDRStatus();
     }
   }
@@ -437,6 +453,8 @@ void HDR10WidgetWinDXGI::showEvent(QShowEvent *event)
 
   if (m_initialized && !m_renderTimer->isActive())
     m_renderTimer->start(16);
+  if (m_initialized && m_hdrPollTimer && !m_hdrPollTimer->isActive())
+    m_hdrPollTimer->start(2000);
 }
 
 void HDR10WidgetWinDXGI::hideEvent(QHideEvent *event)
@@ -445,6 +463,8 @@ void HDR10WidgetWinDXGI::hideEvent(QHideEvent *event)
 
   if (m_renderTimer->isActive())
     m_renderTimer->stop();
+  if (m_hdrPollTimer && m_hdrPollTimer->isActive())
+    m_hdrPollTimer->stop();
   m_frameNeedsUpdate = false;
 }
 
@@ -1174,6 +1194,10 @@ void HDR10WidgetWinDXGI::updateHDRStatus()
 
   emit hdrStatusChanged(caps.hdrActive, caps.systemHandlesTonemapping,
                         caps.maxLuminance, caps.sdrWhiteNits);
+
+  // Force re-render with updated tonemapping state
+  m_frameNeedsUpdate = true;
+  update();
 }
 
 bool HDR10WidgetWinDXGI::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
@@ -1183,16 +1207,19 @@ bool HDR10WidgetWinDXGI::nativeEvent(const QByteArray &eventType, void *message,
     MSG *msg = reinterpret_cast<MSG *>(message);
     if (msg->message == WM_DISPLAYCHANGE)
     {
-      // Display configuration changed: HDR toggle, ACM toggle, monitor connect/disconnect.
-      // Delay the re-detection to avoid reentering DXGI during message processing.
+      // WM_DISPLAYCHANGE fires on resolution/bpp changes (monitor connect/disconnect,
+      // display mode change). It does NOT fire on ACM toggle or HDR on/off —
+      // those are handled by the 2-second poll timer.
+      // On receipt, trigger an immediate refresh instead of waiting for the next poll.
+      qInfo() << "[HDR10WidgetWinDXGI] WM_DISPLAYCHANGE:"
+              << "bpp=" << msg->wParam
+              << "res=" << LOWORD(msg->lParam) << "x" << HIWORD(msg->lParam);
       QTimer::singleShot(100, this, [this]() {
-        if (!m_swapChain)
-          return;
-        m_swapChain->refreshCapabilities();
-        updateHDRStatus();
-        // Force re-render with updated tonemapping state
-        m_frameNeedsUpdate = true;
-        update();
+        if (m_swapChain)
+        {
+          m_swapChain->refreshCapabilities();
+          updateHDRStatus();
+        }
       });
     }
   }

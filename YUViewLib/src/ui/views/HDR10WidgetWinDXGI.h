@@ -185,9 +185,10 @@ private:
   FrameHandler *m_frameHandler{nullptr};
   QString       m_rendererInfo;
   QTimer       *m_renderTimer{nullptr};
+  QTimer       *m_hdrPollTimer{nullptr};  // Poll for HDR/ACM state changes
   int           m_frameCount{0};
 
-  // ── HDR/ACM 状态追踪 (用于 WM_DISPLAYCHANGE 去重) ──
+  // ── HDR/ACM 状态追踪 ──
   bool m_lastHdrActive{false};
   bool m_lastSystemTonemapping{false};
 };
