@@ -100,11 +100,14 @@ cbuffer Constants : register(b0)
     int   colorGamut;              // HDR10_ColorGamut enum: 0=BT2020, 1=BT709, 2=P3
     float gammaValue;              // Gamma exponent (only when eotf=2)
     float diffuseWhiteNits;        // Diffuse white reference (nits) from user settings
+    // --- 16-byte boundary ---
     float hdrBrightness;           // HDR brightness multiplier
     float sdrWhiteNits;            // Windows system SDR white level in nits (scRGB 1.0 = this)
     float hdrActive;               // 1.0 if HDR active
     float systemHandlesTonemapping;// 1.0 if system (HDR or ACM) does tonemapping — skip Reinhard
+    // --- 16-byte boundary ---
     float debugOutput;             // 0=normal, 1=raw texture, 2=raw*10, 3=after EOTF
+    float3 padding;                // Pad to 48 bytes (multiple of 16 for D3D11)
 };
 
 struct PS_INPUT
@@ -308,15 +311,18 @@ static const Vertex g_quadVertices[] = {
 
 struct ConstantBuffer
 {
-  int   eotf;
-  int   colorGamut;
-  float gammaValue;
-  float diffuseWhiteNits;
-  float hdrBrightness;
-  float sdrWhiteNits;              // Windows system SDR white level (scRGB 1.0 = this many nits)
-  float hdrActive;
-  float systemHandlesTonemapping;  // 1.0 if system (HDR or ACM) does tonemapping
-  float debugOutput;
+  int   eotf;                      // offset 0
+  int   colorGamut;                // offset 4
+  float gammaValue;                // offset 8
+  float diffuseWhiteNits;          // offset 12
+  // --- 16-byte boundary (offset 16) ---
+  float hdrBrightness;             // offset 16
+  float sdrWhiteNits;              // offset 20
+  float hdrActive;                 // offset 24
+  float systemHandlesTonemapping;  // offset 28
+  // --- 16-byte boundary (offset 32) ---
+  float debugOutput;               // offset 32
+  float padding[3];                // offset 36-47, pad to 48 bytes (3×16)
 };
 
 struct ViewConstantBuffer
@@ -697,7 +703,7 @@ void HDR10WidgetWinDXGI::render()
 
   // ── Update pixel shader constant buffer (register b0) ────────────
 
-  ConstantBuffer cb;
+  ConstantBuffer cb{};
   cb.eotf                     = static_cast<int>(m_eotf);
   cb.colorGamut               = static_cast<int>(m_colorGamut);
   cb.gammaValue               = m_gammaValue;
