@@ -139,9 +139,9 @@ float3 pqToLinear(float3 pq)
 
 float hlgToLinear(float hlgValue)
 {
-    float a = 0.17883277;
-    float b = 1.0 - 4.0 * a;
-    float c = 0.5 - a * log(4.0 * a);
+    const float a = 0.17883277;
+    const float b = 0.28466892;
+    const float c = 0.55991073;
     if (hlgValue <= 0.5)
         return hlgValue * hlgValue / 3.0;
     return (exp((hlgValue - c) / a) + b) / 12.0;

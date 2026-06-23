@@ -32,6 +32,7 @@
 #pragma once
 
 #include <video/VideoFrame.h>
+#include <common/ColorPipeline.h>
 
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
@@ -46,33 +47,9 @@ namespace video
 // Forward declaration
 class FrameHandler;
 
-/**
- * @brief EOTF (Electro-Optical Transfer Function) 类型
- *
- * 用于将编码值转换为线性光输出。
- * PQ 和 HLG 是 HDR 标准，Gamma 和 sRGB 是 SDR 标准。
- * 在 macOS EDR 模式下，PQ/HLG 输出值可以超过 1.0，
- * 系统自动映射到显示器 HDR 能力。
- */
-enum class HDR10_EOTF
-{
-  PQ     = 0,  // SMPTE ST 2084 (Perceptual Quantizer) - HDR10/DolbyVision
-  HLG    = 1,  // ARIB STD-B67 (Hybrid Log-Gamma) - broadcast HDR
-  Gamma  = 2,  // Pure power-law gamma curve
-  SRGB   = 3   // IEC 61966-2-1 sRGB (piecewise)
-};
-
-/**
- * @brief 色域类型
- *
- * HDR 内容通常使用 BT.2020 色域，需要转换到显示器的 Display P3 色域。
- */
-enum class HDR10_ColorGamut
-{
-  BT2020 = 0,  // ITU-R BT.2020 - ultra-wide gamut for HDR
-  BT709  = 1,  // ITU-R BT.709 - standard HDTV gamut
-  P3     = 2   // DCI-P3 / Display P3 - wide gamut (Apple displays)
-};
+// Aliases for backward compatibility — use color:: enums internally
+using HDR10_EOTF       = color::EOTF;
+using HDR10_ColorGamut = color::ColorGamut;
 
 class HDR10Widget : public QOpenGLWidget, protected QOpenGLFunctions
 {
