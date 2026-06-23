@@ -75,3 +75,8 @@ K:\YUView\jom\jom.exe /J 8 /F Makefile
 - 必须使用 **x64 Native Tools Command Prompt** 或先运行 `vcvarsall.bat amd64`，否则 `nmake`/`jom` 找不到 MSVC 编译器
 - `/J` 参数建议设置为 CPU 逻辑核心数，例如 8 核 CPU 用 `/J 8`
 - 如果修改了 `.pro` 或 `.ui` 文件，需要重新运行 `qmake` 生成 Makefile
+
+## 简洁补充
+
+- `jom` 并行构建时，Qt qmake MSVC Makefile 可能包含 `@<< ... <<` inline 文件语法，这会导致链接命令解析异常。必要时对 Makefile 做兼容修补，或者通过 batch wrapper 规避 PowerShell 解析差异。
+- VS Code Windows 任务应显式使用 `cmd.exe` 或 batch 脚本执行，避免 PowerShell 对 `if not exist`、引号、`&&` 等语法的解析不一致。
