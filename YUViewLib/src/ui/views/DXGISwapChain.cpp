@@ -304,27 +304,16 @@ bool DXGISwapChain::detectHDRCapabilities()
     qWarning() << "[DXGISwapChain] IDXGIOutput6 not available, HDR detection not supported";
   }
 
-  // ── Detect ACM (Advanced Color Management) SDR mode ──
-  // When ACM is active in SDR mode, Windows also performs automatic color
-  // management and tonemapping (like the macOS compositor). We should NOT
-  // apply our own Reinhard tonemapping in this case.
-  //
-  // Detection heuristic: In SDR mode (hdrActive == false), if IDXGIOutput6
-  // reports MaxLuminance > 80 nits, ACM is likely active. Without ACM, SDR
-  // mode typically reports MaxLuminance of 0 or 80.
-  m_caps.acmActive = (!m_caps.hdrActive && m_caps.maxLuminance > 80.0f);
+  // ── ACM detection via DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO ──
+  // IDXGIOutput6::GetDesc1() reports hardware caps that don't change with ACM
+  // toggle. The real indicator is the AdvancedColorEnabled bit from
+  // DISPLAYCONFIG_ADVANCED_COLOR_INFO (type 9), which reflects the actual
+  // compositor state. We query it in the SDR white level section below and
+  // set acmActive + systemHandlesTonemapping there.
+  m_caps.acmActive = false;
+  m_caps.systemHandlesTonemapping = m_caps.hdrActive;
 
-  // System handles tonemapping when HDR is active OR ACM SDR is active
-  m_caps.systemHandlesTonemapping = m_caps.hdrActive || m_caps.acmActive;
-
-  qInfo() << "[DXGISwapChain] HDR:" << m_caps.hdrActive
-          << "ACM:" << m_caps.acmActive
-          << "systemTonemap:" << m_caps.systemHandlesTonemapping
-          << "maxLum:" << m_caps.maxLuminance;
-
-  // ── Get Windows SDR white level (system-wide HDR brightness slider) ──
-  // Uses DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL (type 11).
-  // SDRWhiteLevel / 1000 * 80 = nits (e.g. 1000 = 80 nits, 2500 = 200 nits).
+  // ── Get Windows SDR white level + Advanced Color state ──
   UINT32 pathCount, modeCount;
   if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATH, &pathCount, &modeCount) == ERROR_SUCCESS)
   {
@@ -341,10 +330,36 @@ bool DXGISwapChain::detectHDRCapabilities()
 
       if (DisplayConfigGetDeviceInfo(&sdrLevel.header) == ERROR_SUCCESS && sdrLevel.SDRWhiteLevel > 0)
       {
-        float sdrNits = (sdrLevel.SDRWhiteLevel / 1000.0f) * 80.0f;
-        m_caps.sdrWhiteNits = sdrNits;
-
+        m_caps.sdrWhiteNits = (sdrLevel.SDRWhiteLevel / 1000.0f) * 80.0f;
       }
+
+      // ── Query DISPLAYCONFIG_ADVANCED_COLOR_INFO (type 9) ──
+      // AdvancedColorEnabled (bit 1) indicates the display is in Advanced Color
+      // mode — either HDR or ACM SDR. In both cases the system compositor
+      // handles color management and tonemapping, so we skip Reinhard.
+      struct {
+        DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        UINT32 value;
+        UINT32 colorEncoding;
+        UINT32 bitsPerColorChannel;
+      } acInfo = {};
+      acInfo.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(9);
+      acInfo.header.size = sizeof(acInfo);
+      acInfo.header.adapterId = paths[0].targetInfo.adapterId;
+      acInfo.header.id = paths[0].targetInfo.id;
+
+      if (DisplayConfigGetDeviceInfo(&acInfo.header) == ERROR_SUCCESS)
+      {
+        bool acmEnabled = (acInfo.value & 0x2) != 0;
+        m_caps.acmActive = acmEnabled && !m_caps.hdrActive;
+        m_caps.systemHandlesTonemapping = m_caps.hdrActive || m_caps.acmActive;
+      }
+
+      qInfo() << "[DXGISwapChain] HDR:" << m_caps.hdrActive
+              << "ACM:" << m_caps.acmActive
+              << "systemTonemap:" << m_caps.systemHandlesTonemapping
+              << "maxLum:" << m_caps.maxLuminance
+              << "sdrWhite:" << m_caps.sdrWhiteNits;
     }
   }
 
