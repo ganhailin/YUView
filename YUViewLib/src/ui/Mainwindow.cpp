@@ -969,25 +969,26 @@ void MainWindow::resetWindowLayout()
   ui.playbackControllerDock->setFloating(false);
   ui.fileInfoDock->setFloating(false);
   ui.cachingInfoDock->setFloating(false);
+  ui.hdrSettingsDock->setFloating(false);
 
   // show the menu bar
   if (!is_Q_OS_MAC)
     ui.menuBar->show();
 
-  // Reset main window state (the size and position of the dock widgets). The code to obtain this
-  // raw value is above.
-  QByteArray mainWindowState = QByteArray::fromHex(
-      "000000ff00000000fd00000003000000000000011600000348fc0200000003fb000000240070006c00610079006c"
-      "0069007300740044006f0063006b005700690064006700650074010000001500000212000000c000fffffffb0000"
-      "001800660069006c00650049006e0066006f0044006f0063006b010000022b000000840000005b00fffffffb0000"
-      "002000630061006300680069006e0067004400650062007500670044006f0063006b01000002b3000000aa000000"
-      "aa00ffffff00000001000000b900000348fc0200000002fb0000001c00700072006f007000650072007400690065"
-      "00730044006f0063006b0100000015000002670000002d00fffffffb000000220064006900730070006c00610079"
-      "0044006f0063006b0057006900640067006500740100000280000000dd000000dd0007ffff000000030000048f00"
-      "000032fc0100000001fb0000002c0070006c00610079006200610063006b0043006f006e00740072006f006c006c"
-      "006500720044006f0063006b01000000000000048f000001460007ffff000002b800000348000000040000000400"
-      "00000800000008fc00000000");
-  restoreState(mainWindowState);
+  // Reset main window state: arrange dock widgets explicitly
+  // Left side: Playlist, Info, then HDR/Color Settings + Caching Info tabbed together
+  addDockWidget(Qt::LeftDockWidgetArea, ui.playlistDockWidget);
+  splitDockWidget(ui.playlistDockWidget, ui.fileInfoDock, Qt::Vertical);
+  splitDockWidget(ui.fileInfoDock, ui.hdrSettingsDock, Qt::Vertical);
+  addDockWidget(Qt::LeftDockWidgetArea, ui.cachingInfoDock);
+  tabifyDockWidget(ui.hdrSettingsDock, ui.cachingInfoDock);
+  ui.hdrSettingsDock->raise();
+
+  // Right side: Properties
+  addDockWidget(Qt::RightDockWidgetArea, ui.propertiesDock);
+
+  // Bottom: Playback controls
+  addDockWidget(Qt::BottomDockWidgetArea, ui.playbackControllerDock);
 
   // Set the size/position of the main window
   setGeometry(0, 0, 1100, 750);
