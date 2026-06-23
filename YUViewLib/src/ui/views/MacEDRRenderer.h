@@ -29,30 +29,14 @@
 #include <memory>
 
 #include <video/VideoFrame.h>
+#include <common/ColorPipeline.h>
 
 namespace video
 {
 
-/**
- * @brief macOS EOTF 类型
- */
-enum class MacEDR_EOTF
-{
-  PQ     = 0,
-  HLG    = 1,
-  Gamma  = 2,
-  SRGB   = 3
-};
-
-/**
- * @brief macOS 色域类型
- */
-enum class MacEDR_ColorGamut
-{
-  BT2020 = 0,
-  BT709  = 1,
-  P3     = 2
-};
+// Use unified color:: enums
+using MacEDR_EOTF       = color::EOTF;
+using MacEDR_ColorGamut = color::ColorGamut;
 
 /**
  * @brief Metal 渲染器，支持 macOS EDR (Extended Dynamic Range)

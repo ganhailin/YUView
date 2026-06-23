@@ -125,8 +125,8 @@ bool HDR10WidgetMacEDR::initializeRenderer()
 
   // Apply EDR color processing settings that were loaded from QSettings
   // (these may have been set before the renderer was created)
-  m_renderer->setEOTF(static_cast<MacEDR_EOTF>(m_eotf));
-  m_renderer->setColorGamut(static_cast<MacEDR_ColorGamut>(m_colorGamut));
+  m_renderer->setEOTF(m_eotf);
+  m_renderer->setColorGamut(m_colorGamut);
   m_renderer->setGammaValue(m_gammaValue);
   m_renderer->setDiffuseWhite(m_diffuseWhiteNits);
   m_renderer->setHDRBrightness(m_hdrBrightness);
@@ -211,22 +211,22 @@ void HDR10WidgetMacEDR::setMoveOffset(QPointF offset)
   updatePixelOverlay();
 }
 
-void HDR10WidgetMacEDR::setEOTF(EOTF eotf)
+void HDR10WidgetMacEDR::setEOTF(color::EOTF eotf)
 {
   m_eotf = eotf;
   if (m_renderer)
   {
-    m_renderer->setEOTF(static_cast<MacEDR_EOTF>(eotf));
+    m_renderer->setEOTF(eotf);
     m_renderer->render();
   }
 }
 
-void HDR10WidgetMacEDR::setColorGamut(ColorGamut gamut)
+void HDR10WidgetMacEDR::setColorGamut(color::ColorGamut gamut)
 {
   m_colorGamut = gamut;
   if (m_renderer)
   {
-    m_renderer->setColorGamut(static_cast<MacEDR_ColorGamut>(gamut));
+    m_renderer->setColorGamut(gamut);
     m_renderer->render();
   }
 }

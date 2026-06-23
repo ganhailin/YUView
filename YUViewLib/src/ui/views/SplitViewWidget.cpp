@@ -198,8 +198,8 @@ void splitViewWidget::applyColorSettingsToWidgets()
 #ifdef Q_OS_MAC
   if (hdr10WidgetMacEDR)
   {
-    hdr10WidgetMacEDR->setEOTF(static_cast<video::HDR10WidgetMacEDR::EOTF>(m_colorEOTF));
-    hdr10WidgetMacEDR->setColorGamut(static_cast<video::HDR10WidgetMacEDR::ColorGamut>(m_colorGamut));
+    hdr10WidgetMacEDR->setEOTF(m_colorEOTF);
+    hdr10WidgetMacEDR->setColorGamut(m_colorGamut);
     hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
     hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
     hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
@@ -239,8 +239,8 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
       hdr10WidgetMacEDR->setZoom(this->zoomFactor);
       hdr10WidgetMacEDR->setMoveOffset(this->moveOffset);
-      hdr10WidgetMacEDR->setEOTF(static_cast<video::HDR10WidgetMacEDR::EOTF>(m_colorEOTF));
-      hdr10WidgetMacEDR->setColorGamut(static_cast<video::HDR10WidgetMacEDR::ColorGamut>(m_colorGamut));
+      hdr10WidgetMacEDR->setEOTF(m_colorEOTF);
+      hdr10WidgetMacEDR->setColorGamut(m_colorGamut);
       hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
       hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
       hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);

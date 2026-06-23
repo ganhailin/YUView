@@ -55,38 +55,8 @@ struct VideoUniforms
 };
 
 // ========== 色域转换矩阵 ==========
-
-// BT.2020 → Display P3 (通过 XYZ 中间空间)
-static const float BT2020_TO_P3[9] = {
-    1.343578f, -0.282180f, -0.061404f,
-   -0.065298f,  1.075788f, -0.010490f,
-    0.002822f, -0.019594f,  1.016915f
-};
-
-// BT.709 → Display P3
-static const float BT709_TO_P3[9] = {
-    0.822462f,  0.177536f, -0.000004f,
-    0.033194f,  0.966807f, -0.000000f,
-    0.017085f,  0.072414f,  0.910644f
-};
-
-// P3 → P3 (identity)
-static const float P3_TO_P3[9] = {
-    1.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 1.0f
-};
-
-static const float *getGamutMatrix(MacEDR_ColorGamut gamut)
-{
-  switch (gamut)
-  {
-    case MacEDR_ColorGamut::BT2020: return BT2020_TO_P3;
-    case MacEDR_ColorGamut::BT709:  return BT709_TO_P3;
-    case MacEDR_ColorGamut::P3:     return P3_TO_P3;
-    default:                         return BT2020_TO_P3;
-  }
-}
+// Now uses unified color::getGamutMatrix() from ColorPipeline.h
+// (source → Display P3 target)
 
 MacEDRRenderer::MacEDRRenderer()
 {
@@ -408,7 +378,7 @@ void MacEDRRenderer::render()
   uniforms.sourceGamut = static_cast<int>(m_colorGamut);
   uniforms.gammaValue = m_gammaValue;
   uniforms.diffuseWhiteNits = m_diffuseWhiteNits;
-  const float *matrix = getGamutMatrix(m_colorGamut);
+  const float *matrix = color::getGamutMatrix(m_colorGamut, color::ColorGamut::P3);
   for (int i = 0; i < 9; ++i)
     uniforms.gamutMatrix[i] = matrix[i];
 

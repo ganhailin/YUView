@@ -36,6 +36,7 @@
 #ifdef Q_OS_MAC
 
 #include <video/VideoFrame.h>
+#include <common/ColorPipeline.h>
 
 #include <QWidget>
 #include <QWindow>
@@ -47,6 +48,10 @@ namespace video
 // Forward declaration
 class FrameHandler;
 class MacEDRRenderer;
+
+// Aliases — use unified color:: enums
+using MacEDR_EOTF       = color::EOTF;
+using MacEDR_ColorGamut = color::ColorGamut;
 
 /**
  * @brief macOS EDR HDR 显示 Widget
@@ -84,24 +89,9 @@ public:
   void setMoveOffset(QPointF offset);
   void setShowRawData(bool show);
 
-  // EOTF 和色域设置
-  enum class EOTF
-  {
-    PQ     = 0, // SMPTE ST 2084 (Perceptual Quantizer)
-    HLG    = 1, // ARIB STD-B67 (Hybrid Log-Gamma)
-    Gamma  = 2, // Pure gamma curve
-    SRGB   = 3  // sRGB piecewise linear/gamma 2.4
-  };
-
-  enum class ColorGamut
-  {
-    BT2020 = 0, // ITU-R BT.2020
-    BT709  = 1, // ITU-R BT.709
-    P3     = 2  // DCI-P3 / Display P3
-  };
-
-  void setEOTF(EOTF eotf);
-  void setColorGamut(ColorGamut gamut);
+  // EOTF 和色域设置 — uses unified color:: enums
+  void setEOTF(color::EOTF eotf);
+  void setColorGamut(color::ColorGamut gamut);
   void setGammaValue(float gamma);
   void setDiffuseWhiteNits(float nits);
   void setHDRBrightness(float brightness);
@@ -145,9 +135,9 @@ private:
   bool m_edrSupported{false};
   float m_maxEDRValue{1.0f};
 
-  // Color processing parameters
-  EOTF       m_eotf{EOTF::SRGB};
-  ColorGamut m_colorGamut{ColorGamut::BT709};
+  // Color processing parameters — unified color:: enums
+  color::EOTF       m_eotf{color::EOTF::SRGB};
+  color::ColorGamut m_colorGamut{color::ColorGamut::BT709};
   float      m_gammaValue{2.2f};
   float      m_diffuseWhiteNits{203.0f};
   float      m_hdrBrightness{1.0f};
