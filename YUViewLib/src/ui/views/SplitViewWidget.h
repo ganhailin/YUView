@@ -228,10 +228,6 @@ protected:
   QAction                       actionSeparateViewPlaybackBoth;
   QAction                       actionZoomBox;
   QAction                       actionFullScreen;
-  QAction                       actionHDRRendering;
-  QAction                       actionHDRDithering;
-  QAction                       actionEDRMode;          // Toggle Metal EDR mode on macOS
-  QAction                       actionDXGIMode;         // Toggle DXGI HDR mode on Windows
 
   void         updateMouseTracking();
   virtual bool updateMouseCursor(const QPoint &srcMousePos) override;

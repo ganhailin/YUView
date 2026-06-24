@@ -53,6 +53,13 @@ HDRSettingsDock::HDRSettingsDock(QWidget *parent)
   mainLayout->addWidget(m_checkDXGI);
 #endif
 
+#ifdef Q_OS_MAC
+  m_checkEDR = new QCheckBox("EDR (Metal Renderer)");
+  m_checkEDR->setToolTip("Use macOS Metal renderer for EDR display. When enabled, uses CAMetalLayer "
+                         "with Extended Linear Display P3 color space for reliable HDR output.");
+  mainLayout->addWidget(m_checkEDR);
+#endif
+
   m_checkDithering = new QCheckBox("Dithering");
   m_checkDithering->setToolTip("Enable Bayer dithering for HDR rendering to reduce banding on SDR displays.");
   mainLayout->addWidget(m_checkDithering);
@@ -160,6 +167,9 @@ HDRSettingsDock::HDRSettingsDock(QWidget *parent)
 #ifdef Q_OS_WIN
   connect(m_checkDXGI, &QCheckBox::toggled, this, &HDRSettingsDock::onDXGIToggled);
 #endif
+#ifdef Q_OS_MAC
+  connect(m_checkEDR, &QCheckBox::toggled, this, &HDRSettingsDock::onEDRToggled);
+#endif
   connect(m_checkDithering, &QCheckBox::toggled, this, &HDRSettingsDock::onAnySettingChanged);
 
   onEOTFChanged(m_comboEOTF->currentIndex());
@@ -186,6 +196,10 @@ void HDRSettingsDock::loadSettings()
   m_checkDXGI->setChecked(settings.value("View/UseDXGIMode", true).toBool());
   m_checkDXGI->setEnabled(m_checkHDR->isChecked());
 #endif
+#ifdef Q_OS_MAC
+  m_checkEDR->setChecked(settings.value("View/EDRMode", true).toBool());
+  m_checkEDR->setEnabled(m_checkHDR->isChecked());
+#endif
   updateDitheringState();
 }
 
@@ -205,6 +219,9 @@ void HDRSettingsDock::applySettings()
 #ifdef Q_OS_WIN
   settings.setValue("View/UseDXGIMode", m_checkDXGI->isChecked());
 #endif
+#ifdef Q_OS_MAC
+  settings.setValue("View/EDRMode", m_checkEDR->isChecked());
+#endif
 
   // Trigger SplitViewWidget to reload all settings (HDR mode + color params)
   m_splitView->updateSettings();
@@ -222,11 +239,20 @@ void HDRSettingsDock::onHDRToggled(bool checked)
 #ifdef Q_OS_WIN
   m_checkDXGI->setEnabled(checked);
 #endif
+#ifdef Q_OS_MAC
+  m_checkEDR->setEnabled(checked);
+#endif
   updateDitheringState();
   applySettings();
 }
 
 void HDRSettingsDock::onDXGIToggled(bool)
+{
+  updateDitheringState();
+  applySettings();
+}
+
+void HDRSettingsDock::onEDRToggled(bool)
 {
   updateDitheringState();
   applySettings();
@@ -290,9 +316,13 @@ void HDRSettingsDock::updateDitheringState()
 #ifdef Q_OS_WIN
   dxgiOn = m_checkDXGI && m_checkDXGI->isChecked();
 #endif
+  bool edrOn = false;
+#ifdef Q_OS_MAC
+  edrOn = m_checkEDR && m_checkEDR->isChecked();
+#endif
   // Dithering is only available when HDR is enabled and DXGI/EDR mode is off
   // (DXGI uses FP16 scRGB which doesn't need dithering; EDR uses Metal's native HDR)
-  bool ditheringAvailable = hdrOn && !dxgiOn;
+  bool ditheringAvailable = hdrOn && !dxgiOn && !edrOn;
   m_checkDithering->setEnabled(ditheringAvailable);
   if (!ditheringAvailable)
     m_checkDithering->setChecked(false);

@@ -731,7 +731,12 @@ void HDR10WidgetWinDXGI::render()
   cb.hdrBrightness            = m_hdrBrightness;
   cb.sdrWhiteNits             = caps.sdrWhiteNits;
   cb.hdrActive                = caps.hdrActive ? 1.0f : 0.0f;
-  cb.systemHandlesTonemapping = caps.systemHandlesTonemapping ? 1.0f : 0.0f;
+  // Reinhard tonemapping is needed only when:
+  //   1. The system is NOT handling tonemapping (SDR without ACM), AND
+  //   2. The content is HDR (PQ/HLG) — linear light may exceed 1.0 and needs compression.
+  // SDR content (sRGB/Gamma) has linear values already in 0-1 range, so skip Reinhard.
+  bool isHDREOTF = (m_eotf == video::HDR10_EOTF::PQ || m_eotf == video::HDR10_EOTF::HLG);
+  cb.systemHandlesTonemapping = (caps.systemHandlesTonemapping || !isHDREOTF) ? 1.0f : 0.0f;
   cb.debugOutput              = m_debugOutput;
 
   D3D11_MAPPED_SUBRESOURCE mapped;

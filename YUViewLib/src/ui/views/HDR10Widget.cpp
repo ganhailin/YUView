@@ -491,8 +491,12 @@ void HDR10Widget::paintGL()
   glUniformMatrix3fv(currentProgram->uniformLocation("gamutMatrix"), 1, GL_FALSE, gamutMat.constData());
 
   // Set tonemapping and OETF uniforms
-  // OpenGL is always SDR: system does NOT handle tonemapping, and we always apply sRGB OETF
-  glUniform1f(currentProgram->uniformLocation("systemHandlesTonemapping"), 0.0f);
+  // OpenGL is always SDR (8-bit FBO), so we always apply sRGB OETF for output.
+  // Reinhard tonemapping should only be applied for HDR content (PQ/HLG) whose
+  // linear light may exceed 1.0 and needs compression to SDR range.
+  // SDR content (sRGB/Gamma) already has linear values in 0-1 range — skip Reinhard.
+  bool isHDREOTF = (m_eotf == video::HDR10_EOTF::PQ || m_eotf == video::HDR10_EOTF::HLG);
+  glUniform1f(currentProgram->uniformLocation("systemHandlesTonemapping"), isHDREOTF ? 0.0f : 1.0f);
   glUniform1f(currentProgram->uniformLocation("applySRGBOETF"), 1.0f);
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);

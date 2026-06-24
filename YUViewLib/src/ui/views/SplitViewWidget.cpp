@@ -203,6 +203,28 @@ void splitViewWidget::applyColorSettingsToWidgets()
     hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
     hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
     hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
+
+    // Toggle MacEDR widget visibility based on EDR mode setting.
+    // This must be done here (not just in setHDRRenderingMode) because
+    // setHDRRenderingMode has an early return when the mode hasn't changed,
+    // so toggling EDR alone wouldn't update widget visibility.
+    if (hdrRenderingMode != HDRRenderingMode::Disabled)
+    {
+      bool useMacEDR = settings.value("View/EDRMode", true).toBool();
+      if (useMacEDR)
+      {
+        hdr10WidgetMacEDR->show();
+        hdr10WidgetMacEDR->raise();
+        if (hdr10Widget)
+          hdr10Widget->hide();
+      }
+      else
+      {
+        hdr10WidgetMacEDR->hide();
+        if (hdr10Widget)
+          hdr10Widget->show();
+      }
+    }
   }
 #endif
 #ifdef Q_OS_WIN

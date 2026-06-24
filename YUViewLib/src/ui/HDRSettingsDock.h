@@ -76,6 +76,7 @@ private slots:
   void onEOTFChanged(int index);
   void onHDRToggled(bool checked);
   void onDXGIToggled(bool checked);
+  void onEDRToggled(bool checked);
   void onAnySettingChanged();
 
 private:
@@ -90,6 +91,7 @@ private:
   QDoubleSpinBox *m_spinBrightness{};
   QCheckBox      *m_checkHDR{};
   QCheckBox      *m_checkDXGI{};
+  QCheckBox      *m_checkEDR{};
   QCheckBox      *m_checkDithering{};
   QLabel         *m_labelHDRInfo{};
   QLabel         *m_labelGamma{};

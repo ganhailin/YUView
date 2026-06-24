@@ -267,7 +267,7 @@
     <string>HDR / Color Settings</string>
    </property>
    <attribute name="dockWidgetArea">
-    <number>8</number>
+    <number>1</number>
    </attribute>
    <widget class="HDRSettingsDock" name="hdrSettingsWidget"/>
   </widget>
