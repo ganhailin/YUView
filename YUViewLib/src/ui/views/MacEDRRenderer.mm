@@ -66,16 +66,18 @@ MacEDRRenderer::~MacEDRRenderer()
 {
   // Release Metal objects that we own (not owned by NSView).
   // During application shutdown, the NSView hierarchy is destroyed first,
-  // which releases m_metalLayer (set as view.layer). We must NOT release
-  // it again here — it would be a double-free / dangling pointer.
+  // which releases m_edrView (added as subview), which in turn releases
+  // m_metalLayer (set as edrView.layer) and m_overlayLayer (sublayer).
+  // We must NOT release these again — it would be a double-free.
   //
   // Safe to release (not owned by view):
   //   m_device, m_commandQueue — created directly from MTLCreateSystemDefaultDevice
   //   m_pipelineStateVideo, m_videoVertexBuffer, m_rgbaTexture — created from device
   //
-  // NOT safe to release (owned by view, released when view deallocs):
-  //   m_metalLayer — set as view.layer, view releases it
-  //   m_overlayLayer — added as sublayer, view releases it
+  // NOT safe to release (owned by view hierarchy):
+  //   m_edrView — added as subview, parent view releases it
+  //   m_metalLayer — set as edrView.layer, edrView releases it
+  //   m_overlayLayer — added as sublayer, edrView releases it
 
   if (m_device)          { CFRelease(m_device); m_device = nullptr; }
   if (m_commandQueue)    { CFRelease(m_commandQueue); m_commandQueue = nullptr; }
@@ -175,9 +177,20 @@ bool MacEDRRenderer::initialize(QWindow *window)
   // view.layer now owns metalLayer — use __bridge (no extra retain)
   m_metalLayer = (__bridge void *)metalLayer;
 
-  // 将 MetalLayer 添加到 NSView
-  view.wantsLayer = YES;
-  view.layer = metalLayer;
+  // CRITICAL: Do NOT set metalLayer directly as view.layer on the QWindow's NSView.
+  // Qt's createWindowContainer NSView has its own backing store and color management
+  // that interferes with EDR — it applies an extra sRGB decode to the linear light
+  // output of the Metal layer, causing the image to look wrong (double decode).
+  //
+  // Instead, create an independent NSView dedicated to hosting the CAMetalLayer,
+  // and add it as a subview. This isolates the EDR layer from Qt's NSView management.
+  NSView *edrView = [[NSView alloc] initWithFrame:view.bounds];
+  edrView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  edrView.wantsLayer = YES;
+  edrView.layer = metalLayer;
+  [view addSubview:edrView];
+  // edrView is retained by view (as subview). Keep a reference for cleanup.
+  m_edrView = (__bridge void *)edrView;
 
 // NOTE: Do NOT modify the NSView class (e.g., object_setClass) to override
   // hitTest:. Qt's internal NSView subclass uses KVO and dynamic method
@@ -212,8 +225,10 @@ bool MacEDRRenderer::initialize(QWindow *window)
   if (!createRenderPipeline())
   {
     qWarning() << "MacEDRRenderer: failed to create render pipeline";
-    // Release already-retained ObjC objects before returning
-    if (m_metalLayer)      { CFRelease(m_metalLayer); m_metalLayer = nullptr; }
+    // Release already-retained ObjC objects before returning.
+    // m_edrView owns m_metalLayer and m_overlayLayer — releasing edrView
+    // releases them too.
+    if (m_edrView)        { CFRelease(m_edrView); m_edrView = nullptr; m_metalLayer = nullptr; }
     if (m_device)          { CFRelease(m_device); m_device = nullptr; }
     if (m_commandQueue)    { CFRelease(m_commandQueue); m_commandQueue = nullptr; }
     return false;
@@ -224,7 +239,7 @@ bool MacEDRRenderer::initialize(QWindow *window)
   {
     qWarning() << "MacEDRRenderer: failed to create video vertex buffer";
     // Release already-retained ObjC objects before returning
-    if (m_metalLayer)      { CFRelease(m_metalLayer); m_metalLayer = nullptr; }
+    if (m_edrView)        { CFRelease(m_edrView); m_edrView = nullptr; m_metalLayer = nullptr; }
     if (m_device)          { CFRelease(m_device); m_device = nullptr; }
     if (m_commandQueue)    { CFRelease(m_commandQueue); m_commandQueue = nullptr; }
     if (m_pipelineStateVideo) { CFRelease(m_pipelineStateVideo); m_pipelineStateVideo = nullptr; }
@@ -236,14 +251,16 @@ bool MacEDRRenderer::initialize(QWindow *window)
   // 因为额外的 NSView 会干扰 Metal QWindow 的 KVO 链，导致崩溃
   // "method signature argument cannot be nil"。
   // 使用原生 CALayer 叠加在 Metal 层上方，完全绕过 Qt 的 NSView 管理。
+  // Overlay is added to the edrView's layer (which hosts the metalLayer),
+  // so it appears above the Metal content.
   {
     CALayer *overlayLayer = [CALayer layer];
-    overlayLayer.frame = view.bounds;
+    overlayLayer.frame = edrView.bounds;
     overlayLayer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
     overlayLayer.opacity = 1.0;
     overlayLayer.contentsGravity = kCAGravityTopLeft;
-    // Add above the Metal layer in the layer hierarchy
-    [view.layer addSublayer:overlayLayer];
+    // Add above the Metal layer in the edrView's layer hierarchy
+    [edrView.layer addSublayer:overlayLayer];
     // Use __bridge (no retain) — the view owns the layer via addSublayer.
     // We only need a weak reference to update contents later.
     m_overlayLayer = (__bridge void *)overlayLayer;

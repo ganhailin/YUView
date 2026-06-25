@@ -116,6 +116,7 @@ private:
   void *m_commandQueue{nullptr};
   void *m_metalLayer{nullptr};
   void *m_overlayLayer{nullptr};  // CALayer for pixel value overlay above Metal
+  void *m_edrView{nullptr};       // Independent NSView hosting the CAMetalLayer (avoids Qt NSView color management)
 
   // Pipeline states
   void *m_pipelineStateVideo{nullptr};

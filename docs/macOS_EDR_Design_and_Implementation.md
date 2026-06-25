@@ -360,6 +360,41 @@ macx {
 
 ---
 
+## 7.5 踩坑记录
+
+### 7.5.1 createWindowContainer 导致 EDR 色彩双重 decode（已修复）
+
+**日期:** 2026-06-24
+
+**现象:** EDR 路径 sRGB 灰阶色彩异常，与非 EDR（QPainter / OpenGL）路径差距明显。Shader 输出经 dump 验证完全正确（sRGB EOTF 线性光值精确匹配理论值），但显示效果错误。
+
+**根因:** `QWidget::createWindowContainer` 创建的 QWindow NSView 有自己的 backing store 和色彩管理系统。当直接将 `CAMetalLayer` 设为该 NSView 的 `view.layer` 时，Qt NSView 会对 EDR layer 的线性光输出施加额外的 sRGB 色彩转换（双重 decode），导致显示色彩异常。
+
+**验证方法:** 创建独立 demo（`edr_linearity_test/`），并排对比两种 NSView 集成方式：
+- **LEFT（正确）**: Pure NSView + `addSubview` — 独立 NSView 持有 CAMetalLayer，通过 `addSubview` 添加到父 NSView
+- **RIGHT（错误）**: `createWindowContainer` + `view.layer = metalLayer` — 直接替换 QWindow NSView 的 layer
+
+两者使用完全相同的 Metal shader、pipeline 和 EDR layer 配置。视觉对比确认 RIGHT 侧色彩异常，LEFT 侧正确。另通过 dump Metal 离屏渲染输出验证 shader 本身无问题。
+
+**修复:** 在 `MacEDRRenderer::initialize()` 中，不再直接 `view.layer = metalLayer`，改为创建独立 NSView + `addSubview`：
+
+```objc
+NSView *edrView = [[NSView alloc] initWithFrame:view.bounds];
+edrView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+edrView.wantsLayer = YES;
+edrView.layer = metalLayer;
+[view addSubview:edrView];  // addSubview 隔离 Qt NSView 色彩管理
+m_edrView = (__bridge void *)edrView;
+```
+
+Overlay CALayer 也改为添加到 `edrView.layer`（而非 `view.layer`）。
+
+**关键文件:** `MacEDRRenderer.mm`（`initialize()` 函数）、`MacEDRRenderer.h`（添加 `m_edrView` 成员）、`edr_linearity_test/`（验证 demo）
+
+**教训:** `createWindowContainer` 创建的 Qt 管理 NSView 不适合直接替换 layer。需要通过 `addSubview` 创建独立的 NSView 子层来隔离 Qt 的色彩管理。
+
+---
+
 ## 8. 文件清单
 
 ### 新增文件
