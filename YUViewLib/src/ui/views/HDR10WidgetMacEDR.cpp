@@ -130,6 +130,7 @@ bool HDR10WidgetMacEDR::initializeRenderer()
   m_renderer->setGammaValue(m_gammaValue);
   m_renderer->setDiffuseWhite(m_diffuseWhiteNits);
   m_renderer->setHDRBrightness(m_hdrBrightness);
+  m_renderer->setPremultipliedAlpha(m_premultipliedAlpha);
 
   // Build renderer info string
   m_rendererInfo = QString("Metal EDR Renderer, EDR: %1, Max EDR: %2x")
@@ -257,6 +258,16 @@ void HDR10WidgetMacEDR::setHDRBrightness(float brightness)
   if (m_renderer)
   {
     m_renderer->setHDRBrightness(brightness);
+    m_renderer->render();
+  }
+}
+
+void HDR10WidgetMacEDR::setPremultipliedAlpha(bool enabled)
+{
+  m_premultipliedAlpha = enabled;
+  if (m_renderer)
+  {
+    m_renderer->setPremultipliedAlpha(enabled);
     m_renderer->render();
   }
 }

@@ -90,6 +90,12 @@ public:
   void setColorGamut(MacEDR_ColorGamut gamut);
   void setGammaValue(float gamma);
 
+  // Alpha blending mode: premultiplied or non-premultiplied.
+  // Pipeline always uses premultiplied blend (One / OneMinusSourceAlpha).
+  // When non-premultiplied mode is selected, the shader multiplies RGB by alpha
+  // to convert to premultiplied before output.
+  void setPremultipliedAlpha(bool enabled);
+
   // 帧数据
   bool loadFrame(const VideoFrame &frame);
   bool hasFrame() const { return m_hasFrame; }
@@ -146,6 +152,9 @@ private:
   // Color processing
   MacEDR_EOTF       m_eotf{MacEDR_EOTF::SRGB};
   MacEDR_ColorGamut m_colorGamut{MacEDR_ColorGamut::BT709};
+
+  // Alpha blending mode
+  bool m_premultipliedAlpha{true};
 };
 
 } // namespace video

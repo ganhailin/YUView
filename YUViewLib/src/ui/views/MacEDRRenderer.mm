@@ -26,6 +26,8 @@
 #include <QWindow>
 #include <QGuiApplication>
 #include <QDebug>
+#include <QSettings>
+#include <QColor>
 
 // macOS 和 Metal 头文件
 #import <Cocoa/Cocoa.h>
@@ -52,6 +54,7 @@ struct VideoUniforms
   float gammaValue;         // Gamma 值
   float diffuseWhiteNits;   // 漫射白亮度 (nits)
   float gamutMatrix[9];     // 3x3 色域转换矩阵 (行优先)
+  int   premultipliedAlpha; // 1 = source is premultiplied, 0 = non-premultiplied (shader will premultiply)
 };
 
 // ========== 色域转换矩阵 ==========
@@ -371,7 +374,20 @@ void MacEDRRenderer::render()
   renderPassDesc.colorAttachments[0].texture = drawable.texture;
   renderPassDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
   renderPassDesc.colorAttachments[0].storeAction = MTLStoreActionStore;
-  renderPassDesc.colorAttachments[0].clearColor = MTLClearColorMake(0.14, 0.14, 0.14, 1.0);
+  // Background clear color: read from QSettings (same as SplitViewWidget).
+  // Must be in linear light (ExtendedLinearDisplayP3), so apply sRGB EOTF
+  // to the sRGB-encoded QColor values.
+  // Alpha=0 so transparent image regions show through to the widget background.
+  QSettings settings;
+  QColor bgColor = settings.value("View/BackgroundColor", QColor(35, 35, 35)).value<QColor>();
+  auto srgbToLinear = [](double srgb) -> double {
+    if (srgb <= 0.04045) return srgb / 12.92;
+    return pow((srgb + 0.055) / 1.055, 2.4);
+  };
+  double bgR = srgbToLinear(bgColor.redF());
+  double bgG = srgbToLinear(bgColor.greenF());
+  double bgB = srgbToLinear(bgColor.blueF());
+  renderPassDesc.colorAttachments[0].clearColor = MTLClearColorMake(bgR, bgG, bgB, 1.0);
 
   id<MTLRenderCommandEncoder> encoder =
       [commandBuffer renderCommandEncoderWithDescriptor:renderPassDesc];
@@ -395,6 +411,7 @@ void MacEDRRenderer::render()
   uniforms.sourceGamut = static_cast<int>(m_colorGamut);
   uniforms.gammaValue = m_gammaValue;
   uniforms.diffuseWhiteNits = m_diffuseWhiteNits;
+  uniforms.premultipliedAlpha = m_premultipliedAlpha ? 1 : 0;
   const float *matrix = color::getGamutMatrix(m_colorGamut, color::ColorGamut::P3);
   for (int i = 0; i < 9; ++i)
     uniforms.gamutMatrix[i] = matrix[i];
@@ -440,6 +457,11 @@ void MacEDRRenderer::setColorGamut(MacEDR_ColorGamut gamut)
 void MacEDRRenderer::setGammaValue(float gamma)
 {
   m_gammaValue = gamma;
+}
+
+void MacEDRRenderer::setPremultipliedAlpha(bool enabled)
+{
+  m_premultipliedAlpha = enabled;
 }
 
 void MacEDRRenderer::setZoom(double zoom)
@@ -525,6 +547,7 @@ bool MacEDRRenderer::createRenderPipeline()
       @"    float gammaValue;\n"
       @"    float diffuseWhiteNits;\n"
       @"    float gamutMatrix[9];\n"
+      @"    int premultipliedAlpha;\n"
       @"};\n"
       @"\n"
       @"// ========== EOTF 函数 ==========\n"
@@ -612,6 +635,16 @@ bool MacEDRRenderer::createRenderPipeline()
       @"    //   10-bit源: <<6 扩展\n"
       @"    //   16-bit源: 原生值\n"
       @"    float3 color = float3(raw.rgb) / 65535.0;\n"
+      @"    float alpha = float(raw.a) / 65535.0;\n"
+      @"\n"
+      @"    // ========== 预乘转换（在非线性编码域进行）==========\n"
+      @"    // Pipeline always uses premultiplied blending (One / OneMinusSourceAlpha).\n"
+      @"    // If source is non-premultiplied, premultiply in the encoding domain\n"
+      @"    // (before EOTF) — this is mathematically correct for gamma/sRGB encoded\n"
+      @"    // content where premultiplication must happen before linearization.\n"
+      @"    if (uniforms.premultipliedAlpha == 0) {\n"
+      @"        color *= alpha;\n"
+      @"    }\n"
       @"\n"
       @"    // ========== EOTF 转换 ==========\n"
       @"    // 将编码值转换为线性光\n"
@@ -651,7 +684,7 @@ bool MacEDRRenderer::createRenderPipeline()
       @"    // 值超过 1.0 的部分由 macOS 自动映射到显示器 HDR 能力\n"
       @"    linear *= hdrBrightness;\n"
       @"\n"
-      @"    return float4(linear, 1.0);\n"
+      @"    return float4(linear, alpha);\n"
       @"}\n";
 
   // 编译着色器
@@ -678,6 +711,15 @@ bool MacEDRRenderer::createRenderPipeline()
   pipelineDesc.vertexFunction = vertexFunction;
   pipelineDesc.fragmentFunction = fragmentFunction;
   pipelineDesc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
+
+  // Pipeline uses premultiplied alpha blending: src * 1 + dest * (1 - srcAlpha).
+  // The shader is responsible for premultiplying RGB by alpha (default).
+  // macOS compositor expects premultiplied data from CAMetalLayer.
+  pipelineDesc.colorAttachments[0].blendingEnabled = YES;
+  pipelineDesc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+  pipelineDesc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+  pipelineDesc.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+  pipelineDesc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
 
   // 配置顶点描述符
   MTLVertexDescriptor *vertexDesc = [[MTLVertexDescriptor alloc] init];

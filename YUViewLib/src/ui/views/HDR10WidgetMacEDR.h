@@ -95,6 +95,7 @@ public:
   void setGammaValue(float gamma);
   void setDiffuseWhiteNits(float nits);
   void setHDRBrightness(float brightness);
+  void setPremultipliedAlpha(bool enabled);
 
   // 状态查询
   bool isEDRSupported() const;
@@ -141,6 +142,9 @@ private:
   float      m_gammaValue{2.2f};
   float      m_diffuseWhiteNits{203.0f};
   float      m_hdrBrightness{1.0f};
+
+  // Alpha blending mode
+  bool m_premultipliedAlpha{true};
 
   // View control
   double  m_zoom{1.0};

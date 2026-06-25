@@ -203,6 +203,8 @@ void splitViewWidget::applyColorSettingsToWidgets()
     hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
     hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
     hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
+    hdr10WidgetMacEDR->setPremultipliedAlpha(
+        settings.value("View/PremultipliedAlpha", true).toBool());
 
     // Toggle MacEDR widget visibility based on EDR mode setting.
     // This must be done here (not just in setHDRRenderingMode) because
@@ -266,6 +268,12 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
       hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
       hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
+
+      // Read premultiplied alpha setting at creation time so the initial
+      // render uses the correct mode (otherwise it defaults to true).
+      QSettings premulSettings;
+      hdr10WidgetMacEDR->setPremultipliedAlpha(
+          premulSettings.value("View/PremultipliedAlpha", true).toBool());
     }
 
     QSettings edrSettings;
