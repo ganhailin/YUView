@@ -16,7 +16,8 @@ HEADERS += $$files(src/*.h, true)
 # macOS: include Objective-C++ Metal renderer source
 macx {
     SOURCES += src/ui/views/MacEDRRenderer.mm \
-               src/ui/views/MacEDRUtil.mm
+               src/ui/views/MacEDRUtil.mm \
+               src/common/FunctionsGuiColorSpace.mm
     LIBS += -framework Metal -framework MetalKit -framework QuartzCore -framework Cocoa
 }
 

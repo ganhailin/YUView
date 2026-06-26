@@ -33,6 +33,8 @@
 #include "videoHandler.h"
 
 #include <QPainter>
+#include <QSettings>
+#include <QColorSpace>
 
 #include <common/FunctionsGui.h>
 
@@ -226,8 +228,37 @@ void videoHandler::drawFrame(QPainter *painter, int frameIdx, double zoomFactor,
   videoRect.moveCenter(QPoint(0, 0));
 
   // Draw the current image (currentImage)
+  // If premultiplied alpha is enabled, the source data is already premultiplied
+  // but may be tagged as non-premultiplied (Format_ARGB32). In that case, we
+  // re-tag it as premultiplied WITHOUT converting (convertedTo would double-premultiply).
+  //
+  // Color management: tag the image as sRGB, then convert to the display's
+  // color space (Display P3 on most Macs). This matches the EDR Metal path
+  // which converts BT.709 → Display P3 in the shader.
   currentImageSetMutex.lock();
-  painter->drawImage(videoRect, currentImage);
+  QImage imgToDraw = currentImage;
+
+  // Ensure the image has an sRGB color space tag, then convert to display color space
+  if (!imgToDraw.colorSpace().isValid())
+    imgToDraw.setColorSpace(QColorSpace::SRgb);
+  QColorSpace displayCS = functionsGui::getDisplayColorSpace();
+  if (displayCS.isValid() && displayCS != QColorSpace::SRgb)
+    imgToDraw = imgToDraw.convertedToColorSpace(displayCS);
+
+  QSettings premulSettings;
+  bool premul = premulSettings.value("View/PremultipliedAlpha", true).toBool();
+  if (premul && imgToDraw.hasAlphaChannel() &&
+      imgToDraw.format() == QImage::Format_ARGB32)
+  {
+    // Re-tag as premultiplied without copying/converting data.
+    QImage premulImage(imgToDraw.bits(), imgToDraw.width(), imgToDraw.height(),
+                       imgToDraw.bytesPerLine(), QImage::Format_ARGB32_Premultiplied);
+    painter->drawImage(videoRect, premulImage);
+  }
+  else
+  {
+    painter->drawImage(videoRect, imgToDraw);
+  }
   currentImageSetMutex.unlock();
 
   if (drawRawValues && zoomFactor >= SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)

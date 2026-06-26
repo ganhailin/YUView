@@ -34,6 +34,8 @@
 
 #include <QDebug>
 #include <QPainter>
+#include <QSettings>
+#include <QColorSpace>
 
 #include <common/FunctionsGui.h>
 #include <decoder/decoderTarga.h>
@@ -459,7 +461,33 @@ void FrameHandler::drawFrame(QPainter *painter, double zoomFactor, bool drawRawV
   videoRect.moveCenter(QPoint(0, 0));
 
   // Draw the current image (currentFrame)
-  painter->drawImage(videoRect, this->currentImage);
+  // If premultiplied alpha is enabled, the source data is already premultiplied
+  // but may be tagged as non-premultiplied (Format_ARGB32). Re-tag without converting.
+  //
+  // Color management: tag the image as sRGB, then convert to the display's
+  // color space (Display P3 on most Macs). This matches the EDR Metal path
+  // which converts BT.709 → Display P3 in the shader.
+  QImage imgToDraw = currentImage;
+
+  if (!imgToDraw.colorSpace().isValid())
+    imgToDraw.setColorSpace(QColorSpace::SRgb);
+  QColorSpace displayCS = functionsGui::getDisplayColorSpace();
+  if (displayCS.isValid() && displayCS != QColorSpace::SRgb)
+    imgToDraw = imgToDraw.convertedToColorSpace(displayCS);
+
+  QSettings settings;
+  bool premul = settings.value("View/PremultipliedAlpha", true).toBool();
+  if (premul && imgToDraw.hasAlphaChannel() &&
+      imgToDraw.format() == QImage::Format_ARGB32)
+  {
+    QImage premulImage(imgToDraw.bits(), imgToDraw.width(), imgToDraw.height(),
+                       imgToDraw.bytesPerLine(), QImage::Format_ARGB32_Premultiplied);
+    painter->drawImage(videoRect, premulImage);
+  }
+  else
+  {
+    painter->drawImage(videoRect, imgToDraw);
+  }
 
   if (drawRawValues && zoomFactor >= SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
   {

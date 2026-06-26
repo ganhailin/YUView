@@ -33,26 +33,18 @@
 
 #include <video/FrameHandler.h>
 #include <video/yuv/videoHandlerYUV.h>
+#include <common/FunctionsGui.h>
 
 #include <QDebug>
 #include <QMatrix3x3>
 #include <QSurfaceFormat>
 #include <QPainter>
 #include <QSettings>
+#include <QColorSpace>
 
 
 namespace video
 {
-
-// OpenGL output is always SDR (QOpenGLWidget FBO is 8-bit).
-// Gamut target is Display P3 for consistent color with Metal path.
-static const color::DisplayInfo glDisplayInfo = {
-    color::OutputColorSpace::SRGB,  // outputSpace
-    false,                           // hdrActive
-    false,                           // systemHandlesTonemapping (OpenGL always does its own)
-    80.0f,                           // sdrWhiteNits
-    1.0f                             // maxEDRValue
-};
 
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
@@ -68,16 +60,11 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
   format.setVersion(3, 3);
 
 #ifdef Q_OS_MAC
-  // macOS EDR support: request extended color buffer range
-  // On macOS, we need at least 8-bit per channel with float capability for EDR
-  // The key is to use GL_RGBA16F as internal format, which allows values > 1.0
-  // 10-bit integer buffers on macOS OpenGL are unreliable, so we use 8-bit + EDR float
+  // macOS: 8-bit color buffers (QOpenGLWidget FBO is always 8-bit on macOS)
   format.setRedBufferSize(8);
   format.setGreenBufferSize(8);
   format.setBlueBufferSize(8);
   format.setAlphaBufferSize(8);
-  // Request float-type color buffer for extended range output
-  format.setColorSpace(QSurfaceFormat::sRGBColorSpace);  // Will be overridden by EDR shader
 #else
   // 10-bit color buffers on non-macOS platforms
   format.setRedBufferSize(10);
@@ -371,8 +358,17 @@ void HDR10Widget::paintGL()
 
   // Disable depth testing for 2D rendering
   glDisable(GL_DEPTH_TEST);
-  glDisable(GL_BLEND);
   glDisable(GL_SCISSOR_TEST);
+
+  // Enable alpha blending for transparent image regions.
+  // Use premultiplied blending: the shader premultiplies in encoding domain.
+  // Note: GL_FRAMEBUFFER_SRGB is NOT used because Qt's QOpenGLWidget NSView
+  // backing store applies an extra sRGB decode, causing double-encode issues
+  // (same root cause as the EDR createWindowContainer color bug).
+  // The shader manually does sRGB OETF and gamut conversion to the display's
+  // color space (queried at runtime via getDisplayColorSpace()).
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
   // Set viewport to full widget size
   glViewport(0, 0, width() * devicePixelRatio(), height() * devicePixelRatio());
@@ -478,8 +474,26 @@ void HDR10Widget::paintGL()
   glUniform1f(currentProgram->uniformLocation("hdrBrightness"), m_hdrBrightness);
 
   // Set gamut conversion matrix (3x3, column-major for OpenGL)
-  // Gamut target is Display P3 for the OpenGL path
-  const float *matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::P3);
+  // Gamut target is the display's color space (queried at runtime).
+  // On macOS with Display P3 screens, this converts BT.709→Display P3.
+  // The shader does sRGB OETF after gamut conversion, outputting sRGB-encoded
+  // values in the display's gamut. This matches QPainter and EDR paths.
+  auto displayCS = functionsGui::getDisplayColorSpace();
+  color::ColorGamut targetGamut = color::ColorGamut::BT709;  // default: sRGB
+  // Check if display is Display P3 by comparing with QColorSpace::DisplayP3
+  if (displayCS.isValid())
+  {
+    // QColorSpace doesn't have a direct "is P3" check, but we can compare
+    // by checking if converting from P3 to the display CS is identity-like.
+    // Simpler: check the ICC profile or compare primaries.
+    // For now, use the gamut matrix approach: if source is BT709 and
+    // we need P3, use P3; otherwise BT709.
+    // Heuristic: Display P3 screens on macOS will have a wider gamut than sRGB.
+    // We detect P3 by checking if the display CS differs from SRgb.
+    if (displayCS != QColorSpace::SRgb)
+      targetGamut = color::ColorGamut::P3;
+  }
+  const float *matrixData = color::getGamutMatrix(m_colorGamut, targetGamut);
   QMatrix3x3 gamutMat;
   for (int row = 0; row < 3; ++row)
   {
@@ -490,14 +504,14 @@ void HDR10Widget::paintGL()
   }
   glUniformMatrix3fv(currentProgram->uniformLocation("gamutMatrix"), 1, GL_FALSE, gamutMat.constData());
 
-  // Set tonemapping and OETF uniforms
-  // OpenGL is always SDR (8-bit FBO), so we always apply sRGB OETF for output.
-  // Reinhard tonemapping should only be applied for HDR content (PQ/HLG) whose
-  // linear light may exceed 1.0 and needs compression to SDR range.
-  // SDR content (sRGB/Gamma) already has linear values in 0-1 range — skip Reinhard.
+  // Set tonemapping and OETF uniforms.
+  // Shader manually does sRGB OETF (GL_FRAMEBUFFER_SRGB is not used due to
+  // Qt NSView backing store double-encode issue).
+  // Reinhard tonemapping only for HDR content (PQ/HLG).
   bool isHDREOTF = (m_eotf == video::HDR10_EOTF::PQ || m_eotf == video::HDR10_EOTF::HLG);
   glUniform1f(currentProgram->uniformLocation("systemHandlesTonemapping"), isHDREOTF ? 0.0f : 1.0f);
   glUniform1f(currentProgram->uniformLocation("applySRGBOETF"), 1.0f);
+  glUniform1i(currentProgram->uniformLocation("premultipliedAlpha"), m_premultipliedAlpha ? 1 : 0);
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

@@ -26,6 +26,7 @@ uniform float hdrBrightness;               // HDR brightness multiplier (default
 uniform mat3  gamutMatrix;                 // 3x3 gamut conversion matrix (source → Display P3)
 uniform float systemHandlesTonemapping;    // 1.0 = system does tonemapping, skip Reinhard
 uniform float applySRGBOETF;               // 1.0 = apply sRGB OETF for SDR output
+uniform int   premultipliedAlpha;          // 1 = source is premultiplied, 0 = shader premultiplies
 
 // ========== EOTF Functions ==========
 
@@ -135,6 +136,13 @@ void main()
 {
     uvec4 raw = texture(texture16bit, vTexCoord);
     vec3 color = vec3(raw.rgb) / 65535.0;
+    float alpha = float(raw.a) / 65535.0;
+
+    // Premultiply in encoding domain if source is non-premultiplied
+    if (premultipliedAlpha == 0) {
+        color *= alpha;
+    }
+
     vec3 outputColor = processColor(color);
-    fragColor = vec4(outputColor, 1.0);
+    fragColor = vec4(outputColor, alpha);
 }

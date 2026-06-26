@@ -194,6 +194,8 @@ void splitViewWidget::applyColorSettingsToWidgets()
     hdr10Widget->setDiffuseWhiteNits(m_colorDiffuseWhite);
     hdr10Widget->setHDRBrightness(m_colorBrightness);
     hdr10Widget->setDithering(ditheringEnabled);
+    hdr10Widget->setPremultipliedAlpha(
+        settings.value("View/PremultipliedAlpha", true).toBool());
   }
 #ifdef Q_OS_MAC
   if (hdr10WidgetMacEDR)
@@ -335,6 +337,8 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       QSettings ditherSettings;
       bool ditheringEnabled = ditherSettings.value("View/HDRDithering", false).toBool();
       hdr10Widget->setDithering(ditheringEnabled);
+      hdr10Widget->setPremultipliedAlpha(
+          ditherSettings.value("View/PremultipliedAlpha", true).toBool());
     }
 
 #ifdef Q_OS_MAC

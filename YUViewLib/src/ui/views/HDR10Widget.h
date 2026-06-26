@@ -78,6 +78,7 @@ public:
   void setGammaValue(float gamma) { m_gammaValue = gamma; update(); }
   void setDiffuseWhiteNits(float nits) { m_diffuseWhiteNits = nits; update(); }
   void setHDRBrightness(float brightness) { m_hdrBrightness = brightness; update(); }
+  void setPremultipliedAlpha(bool enabled) { m_premultipliedAlpha = enabled; update(); }
 
   // State query
   bool supports10bit() const { return m_supports10bit; }
@@ -135,6 +136,7 @@ private:
   float            m_gammaValue{2.2f};
   float            m_diffuseWhiteNits{203.0f};
   float            m_hdrBrightness{1.0f};
+  bool             m_premultipliedAlpha{true};
 
 
   double m_zoom{1.0};

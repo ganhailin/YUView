@@ -52,6 +52,12 @@ namespace functionsGui
 QColor toQColor(const Color &color);
 Color  toColor(const QColor &color);
 
+// Get the display's color space for color management.
+// On macOS, queries NSScreen.colorSpace (typically Display P3).
+// Returns QColorSpace::SRgb as fallback if the display color space
+// cannot be determined or on non-macOS platforms.
+QColorSpace getDisplayColorSpace();
+
 // An image format used internally by QPixmap. On a raster paint backend, the pixmap
 // is backed by an image, and this returns the format of the internal QImage buffer.
 // This will always return the same result as the platformImageFormat when the default

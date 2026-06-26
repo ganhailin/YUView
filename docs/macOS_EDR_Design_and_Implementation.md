@@ -393,24 +393,96 @@ Overlay CALayer 也改为添加到 `edrView.layer`（而非 `view.layer`）。
 
 **教训:** `createWindowContainer` 创建的 Qt 管理 NSView 不适合直接替换 layer。需要通过 `addSubview` 创建独立的 NSView 子层来隔离 Qt 的色彩管理。
 
+### 7.5.2 三条渲染路径的色域管理与一致性
+
+**日期:** 2026-06-26
+
+**背景:** YUView 有三条渲染路径——QPainter（默认）、OpenGL（HDR10Widget）、EDR/Metal（HDR10WidgetMacEDR）。在 Display P3 显示器上，三条路径显示的彩色不一致：EDR 正确显示 sRGB 红（经 BT.709→P3 色域转换），QPainter 和 OpenGL 直接显示 P3 纯红（过饱和）。
+
+**根因:** 三条路径对色域转换的处理不一致：
+- **EDR**：shader 做 BT.709→Display P3 色域转换（正确）
+- **QPainter**：QImage 无色域标记，macOS Core Graphics 按设备色域直接显示（不做转换）
+- **OpenGL**：shader 做了色域转换，但 FBO 的 `QSurfaceFormat::sRGBColorSpace` 在 Qt 的 QOpenGLWidget NSView backing store 下不可靠
+
+**修复方案:** 每条路径独立获取屏幕色域并自行转换：
+
+1. **新增 `functionsGui::getDisplayColorSpace()`**（`FunctionsGuiColorSpace.mm`）：
+   - macOS 上通过 `QNativeInterface::QCocoaScreen::nativeScreen()` 获取 `NSScreen`
+   - 读取 `NSScreen.colorSpace.ICCProfileData`，用 `QColorSpace::fromIccProfile()` 解析
+   - 非 macOS 返回 `QColorSpace::SRgb`
+
+2. **QPainter 路径**（`videoHandler.cpp` + `FrameHandler.cpp`）：
+   - 给 QImage 标记 `QColorSpace::SRgb`
+   - `convertedToColorSpace(displayCS)` 转换到屏幕色域
+   - 注意：`videoHandler::drawFrame` 是 YUV 视频的实际入口，`FrameHandler::drawFrame` 只用于图片文件
+
+3. **OpenGL 路径**（`HDR10Widget.cpp`）：
+   - `paintGL` 中调用 `getDisplayColorSpace()` 判断屏幕色域
+   - 如果不是 sRGB（如 Display P3），色域目标设为 `ColorGamut::P3`
+   - shader 手动做 sRGB OETF（不依赖 `GL_FRAMEBUFFER_SRGB`）
+   - **不能使用 `GL_FRAMEBUFFER_SRGB`**：Qt 的 QOpenGLWidget NSView backing store 会施加额外的 sRGB decode，与 7.5.1 的 createWindowContainer 双重 decode 问题同源
+
+4. **EDR/Metal 路径**：已正确使用 P3 色域目标，无需修改
+
+### 7.5.3 QSurfaceFormat::sRGBColorSpace 与 GL_FRAMEBUFFER_SRGB 不可用
+
+**日期:** 2026-06-26
+
+**问题:** 尝试使用 `QSurfaceFormat::sRGBColorSpace` 和 `glEnable(GL_FRAMEBUFFER_SRGB)` 让 GPU 自动做线性光→sRGB 编码，配合 macOS 合成器自动做 sRGB→Display P3 色域转换。
+
+**根因:** Qt 的 `QOpenGLWidget` 在 macOS 上通过内部 NSView 管理 framebuffer。这个 NSView 的 backing store 会对 FBO 输出施加**额外的色彩管理**：
+- `sRGBColorSpace`：backing store 可能做 sRGB→线性光→sRGB 的双重转换
+- `GL_FRAMEBUFFER_SRGB`：GPU 做 OETF 后，backing store 再做一次 EOTF+OETF
+
+这与 7.5.1 的 createWindowContainer 双重 decode 问题**同源**——Qt 管理的 NSView 会干预 OpenGL 输出的色彩管理。
+
+**修复:** 不使用 `QSurfaceFormat::sRGBColorSpace` 和 `GL_FRAMEBUFFER_SRGB`。shader 手动做完整的 EOTF + 色域转换 + sRGB OETF。色域目标通过 `getDisplayColorSpace()` 动态获取。
+
+### 7.5.4 Alpha 混合与预乘模式
+
+**日期:** 2026-06-26
+
+**背景:** 原始渲染路径不支持图像透明区域——shader 硬编码 `alpha = 1.0`，且 Metal/OpenGL pipeline 未启用 blending。
+
+**修复:**
+
+1. **Metal/EDR pipeline**：启用预乘 alpha blending（`MTLBlendFactorOne / OneMinusSourceAlpha`）。shader 在 EOTF 前（编码域）做预乘：`if (!premultiplied) color *= alpha`。macOS 合成器要求 CAMetalLayer 输出预乘数据。
+
+2. **OpenGL pipeline**：启用 `GL_BLEND` + `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)`（预乘模式）。shader 同样在编码域做预乘。
+
+3. **QPainter 路径**：通过重标记 QImage 格式为 `Format_ARGB32_Premultiplied` 实现（共享像素数据，不转换）。注意必须用 `QImage(bits, w, h, bpl, format)` 构造函数重标记，**不能用 `convertedTo()`**——后者会再次预乘已预乘的数据（双重预乘）。
+
+4. **预乘位置**：预乘必须在 EOTF 之前（编码域）进行，不能在线性光域做。因为预乘是编码域操作，在 gamma/sRGB 曲线上做预乘才是数学正确的。
+
+5. **设置开关**：Settings > General 中添加 "Source texture is premultiplied alpha (EDR)" checkbox。勾选时源数据已是预乘（shader 不做转换），取消时 shader 在编码域做预乘。默认勾选。
+
+**关键文件:** `MacEDRRenderer.mm`、`hdr10_fragment.glsl`、`hdr10_fragment_dither.glsl`、`HDR10Widget.cpp`、`videoHandler.cpp`、`FrameHandler.cpp`、`settingsDialog.ui`、`SettingsDialog.cpp`
+
+### 7.5.5 背景色需要 sRGB EOTF 转换
+
+**日期:** 2026-06-26
+
+**问题:** EDR 路径的 Metal clear color `(0.14, 0.14, 0.14, 1.0)` 被直接输出到 `ExtendedLinearDisplayP3` 层，0.14 被当作线性光解释（≈ sRGB 0.42 的亮度），导致背景过亮。
+
+**修复:** 从 QSettings `View/BackgroundColor` 读取背景色，对 sRGB 值做 sRGB EOTF 转换为线性光后再用作 clear color。OpenGL 路径的 `glClearColor` 保持 sRGB 编码值（因为 shader 手动做 OETF，clear color 在 OETF 之前）。
+
 ---
 
 ## 8. 文件清单
 
 ### 新增文件
 
-| 文件 | 类型 | 行数 | 说明 |
-|------|------|------|------|
-| `YUViewLib/src/ui/views/MacEDRRenderer.h` | C++ 头文件 | ~167 | Metal 渲染器接口 |
-| `YUViewLib/src/ui/views/MacEDRRenderer.mm` | Objective-C++ | ~790 | Metal 渲染器实现 |
-| `YUViewLib/src/ui/views/MacEDRUtil.h` | C++ 头文件 | ~65 | EDR 检测接口 |
-| `YUViewLib/src/ui/views/MacEDRUtil.mm` | Objective-C++ | ~67 | EDR 检测实现 |
-| `YUViewLib/src/ui/views/HDR10WidgetMacEDR.h` | C++ 头文件 | ~168 | Metal EDR widget 接口 |
-| `YUViewLib/src/ui/views/HDR10WidgetMacEDR.cpp` | C++ 源文件 | ~649 | Metal EDR widget 实现 |
-| `YUViewLib/src/ui/EDRSettingsDialog.h` | C++ 头文件 | ~64 | EDR 设置对话框接口 |
-| `YUViewLib/src/ui/EDRSettingsDialog.cpp` | C++ 源文件 | ~102 | EDR 设置对话框实现 |
-| `YUViewLib/ui/edrSettingsDialog.ui` | Qt UI 文件 | ~374 | EDR 设置对话框 UI |
-| `YUViewLib/shaders/hdr10_fragment_edr.glsl` | GLSL 着色器 | ~133 | EDR OpenGL 着色器 |
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `YUViewLib/src/ui/views/MacEDRRenderer.h` | C++ 头文件 | Metal 渲染器接口 |
+| `YUViewLib/src/ui/views/MacEDRRenderer.mm` | Objective-C++ | Metal 渲染器实现 |
+| `YUViewLib/src/ui/views/MacEDRUtil.h` | C++ 头文件 | EDR 检测接口 |
+| `YUViewLib/src/ui/views/MacEDRUtil.mm` | Objective-C++ | EDR 检测实现 |
+| `YUViewLib/src/ui/views/HDR10WidgetMacEDR.h` | C++ 头文件 | Metal EDR widget 接口 |
+| `YUViewLib/src/ui/views/HDR10WidgetMacEDR.cpp` | C++ 源文件 | Metal EDR widget 实现 |
+| `YUViewLib/src/common/FunctionsGuiColorSpace.mm` | Objective-C++ | 屏幕色域获取（macOS NSScreen ICC profile） |
+| `YUViewLib/src/ui/HDRSettingsDock.h` | C++ 头文件 | HDR 设置 dock 面板接口 |
+| `YUViewLib/src/ui/HDRSettingsDock.cpp` | C++ 源文件 | HDR 设置 dock 面板实现 |
 
 ### 修改文件
 

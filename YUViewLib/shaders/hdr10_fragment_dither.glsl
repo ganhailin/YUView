@@ -18,6 +18,7 @@ uniform float hdrBrightness;
 uniform mat3  gamutMatrix;
 uniform float systemHandlesTonemapping;
 uniform float applySRGBOETF;
+uniform int   premultipliedAlpha;
 
 // ========== EOTF Functions ==========
 
@@ -99,6 +100,12 @@ void main()
     uvec4 raw = texture(texture16bit, vTexCoord);
     vec2 pixelPos = gl_FragCoord.xy;
     vec3 color = vec3(raw.rgb) / 65535.0;
+    float alpha = float(raw.a) / 65535.0;
+
+    // Premultiply in encoding domain if source is non-premultiplied
+    if (premultipliedAlpha == 0) {
+        color *= alpha;
+    }
 
     // EOTF Conversion
     vec3 linear;
@@ -137,5 +144,5 @@ void main()
         linear = srgbOetf(linear);
     }
 
-    fragColor = vec4(linear, 1.0);
+    fragColor = vec4(linear, alpha);
 }
