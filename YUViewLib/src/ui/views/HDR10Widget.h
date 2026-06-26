@@ -38,6 +38,7 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
+#include <memory>
 #include <QOpenGLWidget>
 #include <QWidget>
 
@@ -109,8 +110,8 @@ private:
     HDR10Widget *hdrWidget;
   };
 
-  QOpenGLShaderProgram *m_program{nullptr};
-  QOpenGLShaderProgram *m_programDither{nullptr};
+  std::shared_ptr<QOpenGLShaderProgram> m_program;
+  std::shared_ptr<QOpenGLShaderProgram> m_programDither;
   QOpenGLBuffer         m_vbo{QOpenGLBuffer::VertexBuffer};
   QOpenGLVertexArrayObject m_vao;
 
@@ -142,7 +143,7 @@ private:
   double m_zoom{1.0};
   QPointF m_moveOffset{0, 0};
 
-  PixelOverlay *m_pixelOverlay{nullptr};
+  std::shared_ptr<PixelOverlay> m_pixelOverlay;
   FrameHandler *m_frameHandler{nullptr};  // For getting original pixel values
 };
 

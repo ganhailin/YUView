@@ -76,33 +76,30 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
   setFormat(format);
 
   // Create pixel overlay widget
-  m_pixelOverlay = new PixelOverlay(this);
+  m_pixelOverlay = std::make_shared<PixelOverlay>(this);
   m_pixelOverlay->setGeometry(0, 0, width(), height());
   m_pixelOverlay->show();
 }
 
 HDR10Widget::~HDR10Widget()
 {
-  // Safely clean up OpenGL resources. When the application is quitting,
-  // the parent SplitViewWidget is destroyed which deletes this widget via
-  // unique_ptr. At that point, the OpenGL context may already be invalid,
-  // causing makeCurrent() to crash. Check if the context is still usable.
+  // Clean up the GL texture while the context is still valid.
+  // shared_ptr members (m_program, m_programDither, m_pixelOverlay) are
+  // automatically released by their destructors — no manual cleanup needed.
   auto *ctx = context();
   if (ctx && ctx->isValid())
   {
     makeCurrent();
     if (m_textureId != 0)
+    {
       glDeleteTextures(1, &m_textureId);
-    delete m_program;
-    delete m_programDither;
+      m_textureId = 0;
+    }
     doneCurrent();
   }
   else
   {
-    // Context already gone - just null out the pointers
-    // (Qt will clean up the GL framebuffer objects internally)
-    m_program = nullptr;
-    m_programDither = nullptr;
+    m_textureId = 0;
   }
 }
 
@@ -218,13 +215,13 @@ void HDR10Widget::initializeGL()
 
 void HDR10Widget::initShaders()
 {
-  m_program = new QOpenGLShaderProgram(this);
+  m_program = std::make_shared<QOpenGLShaderProgram>(this);
   m_program->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
   m_program->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/hdr10_fragment.glsl");
   if (!m_program->link())
     qWarning() << "HDR10Widget: Standard shader link error:" << m_program->log();
 
-  m_programDither = new QOpenGLShaderProgram(this);
+  m_programDither = std::make_shared<QOpenGLShaderProgram>(this);
   m_programDither->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
   m_programDither->addShaderFromSourceFile(QOpenGLShader::Fragment,
                                            ":/shaders/hdr10_fragment_dither.glsl");
@@ -443,7 +440,7 @@ void HDR10Widget::paintGL()
   m_vbo.allocate(vertices, sizeof(vertices));
   m_vbo.release();
 
-  QOpenGLShaderProgram *currentProgram = nullptr;
+  std::shared_ptr<QOpenGLShaderProgram> currentProgram = nullptr;
 
   // EDR output (>1.0 values) is NOT possible through QOpenGLWidget on macOS
   // (internal FBO is 8-bit RGBA). On macOS, EDR is handled by the Metal-based
