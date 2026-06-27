@@ -36,18 +36,8 @@
 namespace video
 {
 
-VideoFrame::VideoFrame(const QImage &image) : image8bit(std::make_shared<QImage>(image.convertToFormat(QImage::Format_ARGB32)))
+VideoFrame::VideoFrame(const QImage &image) : image8bit(std::make_shared<QImage>(image))
 {
-}
-
-VideoFrame::VideoFrame(const QSize &size) : image8bit(std::make_shared<QImage>(size, QImage::Format_ARGB32))
-{
-  image8bit->fill(Qt::black);
-}
-
-VideoFrame::VideoFrame(int width, int height) : image8bit(std::make_shared<QImage>(width, height, QImage::Format_ARGB32))
-{
-  image8bit->fill(Qt::black);
 }
 
 void VideoFrame::clear()

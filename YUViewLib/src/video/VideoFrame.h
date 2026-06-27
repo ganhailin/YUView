@@ -54,8 +54,6 @@ public:
   VideoFrame() = default;
 
   explicit VideoFrame(const QImage &image);
-  explicit VideoFrame(const QSize &size);
-  VideoFrame(int width, int height);
 
   ~VideoFrame() = default;
 

@@ -38,6 +38,7 @@
 
 #include <QApplication>
 #include <QSettings>
+#include <QSurfaceFormat>
 
 #define APPLICATION_DEBUG 0
 #if APPLICATION_DEBUG && !NDEBUG
@@ -59,6 +60,14 @@ YUViewApplication::YUViewApplication(int argc, char *argv[]) : QApplication(argc
   QGuiApplication::setDesktopFileName("YUView");
 #endif
 #endif
+
+  QSettings settings;
+  if (settings.value("View/UseSRGBColorSpace", false).toBool())
+  {
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setColorSpace(QSurfaceFormat::sRGBColorSpace);
+    QSurfaceFormat::setDefaultFormat(format);
+  }
 
   QStringList args = arguments();
   DEBUG_APP("YUViewApplication args" << args);

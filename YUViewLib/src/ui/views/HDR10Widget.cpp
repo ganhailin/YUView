@@ -476,21 +476,19 @@ void HDR10Widget::paintGL()
   // The shader does sRGB OETF after gamut conversion, outputting sRGB-encoded
   // values in the display's gamut. This matches QPainter and EDR paths.
   auto displayCS = functionsGui::getDisplayColorSpace();
-  color::ColorGamut targetGamut = color::ColorGamut::BT709;  // default: sRGB
-  // Check if display is Display P3 by comparing with QColorSpace::DisplayP3
+
+  // Select target gamut matrix — uses precomputed matrices for standard
+  // primaries, computes from ICC profile for Custom primaries.
+  float customMatrix[9];
+  const float *matrixData;
   if (displayCS.isValid())
   {
-    // QColorSpace doesn't have a direct "is P3" check, but we can compare
-    // by checking if converting from P3 to the display CS is identity-like.
-    // Simpler: check the ICC profile or compare primaries.
-    // For now, use the gamut matrix approach: if source is BT709 and
-    // we need P3, use P3; otherwise BT709.
-    // Heuristic: Display P3 screens on macOS will have a wider gamut than sRGB.
-    // We detect P3 by checking if the display CS differs from SRgb.
-    if (displayCS != QColorSpace::SRgb)
-      targetGamut = color::ColorGamut::P3;
+    matrixData = color::getGamutMatrixForDisplay(m_colorGamut, displayCS, customMatrix);
   }
-  const float *matrixData = color::getGamutMatrix(m_colorGamut, targetGamut);
+  else
+  {
+    matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+  }
   QMatrix3x3 gamutMat;
   for (int row = 0; row < 3; ++row)
   {

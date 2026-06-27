@@ -154,6 +154,19 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="checkBoxSRGBColorSpace">
+         <property name="toolTip">
+          <string>Set the default OpenGL surface format to sRGB color space. This affects color accuracy for OpenGL rendering. On macOS, this may interact with the NSView backing store color management. Default: enabled. Requires restart to take effect.</string>
+         </property>
+         <property name="text">
+          <string>Use sRGB color space for OpenGL surface</string>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacerGeneral">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

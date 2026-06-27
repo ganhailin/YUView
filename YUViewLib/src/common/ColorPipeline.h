@@ -31,6 +31,7 @@
 
 #pragma once
 
+#include <QColorSpace>
 #include <QString>
 
 namespace video::color {
@@ -90,6 +91,15 @@ struct ColorConfig
 /// Get a 3×3 gamut conversion matrix (row-major, 9 floats).
 /// Converts from source gamut to target gamut via XYZ D65 intermediate.
 const float *getGamutMatrix(ColorGamut source, ColorGamut target);
+
+/// Get a 3×3 gamut conversion matrix for a display QColorSpace.
+/// Handles Custom primaries by computing the matrix from the ICC profile
+/// using Qt's color transform. Standard primaries use precomputed matrices.
+/// @param matrixOut  float[9] row-major output buffer (always filled)
+/// @return pointer to matrixOut (for convenience, same as matrixOut)
+const float *getGamutMatrixForDisplay(ColorGamut          source,
+                                      const QColorSpace   &display,
+                                      float               matrixOut[9]);
 
 // ── Shader generation ─────────────────────────────────────────────
 

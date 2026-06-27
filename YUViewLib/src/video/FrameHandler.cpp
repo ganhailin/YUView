@@ -36,6 +36,7 @@
 #include <QPainter>
 #include <QSettings>
 #include <QColorSpace>
+#include <QSurfaceFormat>
 
 #include <common/FunctionsGui.h>
 #include <decoder/decoderTarga.h>
@@ -471,17 +472,28 @@ void FrameHandler::drawFrame(QPainter *painter, double zoomFactor, bool drawRawV
 
   if (!imgToDraw.colorSpace().isValid())
     imgToDraw.setColorSpace(QColorSpace::SRgb);
-  QColorSpace displayCS = functionsGui::getDisplayColorSpace();
+  QColorSpace displayCS = QColorSpace::SRgb;
+  if (QSurfaceFormat::defaultFormat().colorSpace() != QColorSpace::SRgb)
+    displayCS = functionsGui::getDisplayColorSpace();
   if (displayCS.isValid() && displayCS != QColorSpace::SRgb)
     imgToDraw = imgToDraw.convertedToColorSpace(displayCS);
 
+
+  // Premultiplied alpha handling.
+  // On Windows, platformImageFormat returns Format_ARGB32_Premultiplied, so the
+  // data is already premultiplied at creation time — draw directly.
+  // On macOS, platformImageFormat returns Format_ARGB32 (non-premultiplied).
+  // When the premultiplied setting is enabled, we re-tag the format to
+  // Format_ARGB32_Premultiplied WITHOUT converting (the data is assumed to be
+  // already premultiplied by the source). Using convertedTo() would double-premultiply.
   QSettings settings;
   bool premul = settings.value("View/PremultipliedAlpha", true).toBool();
-  if (premul && imgToDraw.hasAlphaChannel() &&
-      imgToDraw.format() == QImage::Format_ARGB32)
+  auto src_format = premul ? QImage::Format_ARGB32_Premultiplied : QImage::Format_ARGB32;
+  if (imgToDraw.hasAlphaChannel() && src_format != imgToDraw.format())
   {
+    // Re-tag as premultiplied (or unpremultiplied) without copying/converting data.
     QImage premulImage(imgToDraw.bits(), imgToDraw.width(), imgToDraw.height(),
-                       imgToDraw.bytesPerLine(), QImage::Format_ARGB32_Premultiplied);
+                       imgToDraw.bytesPerLine(), src_format);
     painter->drawImage(videoRect, premulImage);
   }
   else

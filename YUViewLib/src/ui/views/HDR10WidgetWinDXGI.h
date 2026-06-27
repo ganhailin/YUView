@@ -102,6 +102,7 @@ public:
   void setGammaValue(float gamma) { m_gammaValue = gamma; m_frameNeedsUpdate = true; update(); }
   void setDiffuseWhiteNits(float nits) { m_diffuseWhiteNits = nits; m_frameNeedsUpdate = true; update(); }
   void setHDRBrightness(float brightness) { m_hdrBrightness = brightness; m_frameNeedsUpdate = true; update(); }
+  void setPremultipliedAlpha(bool enabled) { m_premultipliedAlpha = enabled; update(); }
   void setDebugOutput(float mode) { m_debugOutput = mode; m_frameNeedsUpdate = true; update(); }
 
   // ── 状态查询 ──
@@ -150,6 +151,7 @@ private:
   ComPtr<ID3D11Texture2D>        m_texture;
   ComPtr<ID3D11Texture2D>        m_overlayTexture;
   ComPtr<ID3D11BlendState>       m_overlayBlendState;
+  ComPtr<ID3D11BlendState>       m_hdrBlendState; // Premultiplied alpha blend for HDR pipeline
 
   // ── 纹理信息 ──
   QSize m_textureSize;
@@ -175,6 +177,7 @@ private:
   float            m_gammaValue{2.2f};
   float            m_diffuseWhiteNits{203.0f};
   float            m_hdrBrightness{1.0f};
+  bool             m_premultipliedAlpha{true};
   float            m_debugOutput{0.0f};  // 0=normal, 1=raw, 2=raw*10, 3=after EOTF
 
   // ── 视图控制 ──

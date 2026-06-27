@@ -32,6 +32,9 @@
 #include "ColorPipeline.h"
 
 #include <cmath>
+#include <QColorSpace>
+#include <QColorTransform>
+#include <QtGui/QtGui>
 
 namespace video::color {
 
@@ -92,6 +95,65 @@ const float *getGamutMatrix(ColorGamut source, ColorGamut target)
     default:
       return IDENTITY;
   }
+}
+
+static QColorSpace::Primaries gamutToPrimaries(ColorGamut g)
+{
+  switch (g)
+  {
+    case ColorGamut::BT2020: return QColorSpace::Primaries::Bt2020;
+    case ColorGamut::BT709:  return QColorSpace::Primaries::SRgb;
+    case ColorGamut::P3:     return QColorSpace::Primaries::DciP3D65;
+    default:                 return QColorSpace::Primaries::SRgb;
+  }
+}
+
+/// Get gamut matrix for a display QColorSpace (handles Custom primaries).
+/// Uses precomputed matrices for standard primaries, computes from color
+/// transform for Custom primaries.
+/// @param matrixOut  float[9] row-major output buffer, always filled
+const float *getGamutMatrixForDisplay(ColorGamut          source,
+                                      const QColorSpace &display,
+                                      float              matrixOut[9])
+{
+  if (!display.isValid())
+    return getGamutMatrix(source, ColorGamut::BT709);
+
+  auto primaries = display.primaries();
+
+  // Standard primaries — use precomputed matrix
+  switch (primaries)
+  {
+    case QColorSpace::Primaries::SRgb:
+      return getGamutMatrix(source, ColorGamut::BT709);
+    case QColorSpace::Primaries::DciP3D65:
+      return getGamutMatrix(source, ColorGamut::P3);
+    default:
+      break;
+  }
+
+  // Custom primaries — compute matrix from Qt color transform.
+  // Build source color space (linear version), then use QColorTransform
+  // to map basis vectors through.
+  QColorSpace srcCS(gamutToPrimaries(source),
+                    QColorSpace::TransferFunction::Linear);
+  QColorTransform xform = srcCS.transformationToColorSpace(display);
+
+  // Map RGB unit vectors to build the 3×3 matrix
+  auto mapFloat = [&](float r, float g, float b) -> QRgbaFloat32 {
+    return xform.map(QRgbaFloat32{r, g, b, 1.0f});
+  };
+
+  auto r = mapFloat(1.0f, 0.0f, 0.0f);
+  auto g = mapFloat(0.0f, 1.0f, 0.0f);
+  auto b = mapFloat(0.0f, 0.0f, 1.0f);
+
+  // Row-major 3×3: [R', G', B'] = M × [R, G, B]
+  matrixOut[0] = r.r;  matrixOut[1] = r.g;  matrixOut[2] = r.b;
+  matrixOut[3] = g.r;  matrixOut[4] = g.g;  matrixOut[5] = g.b;
+  matrixOut[6] = b.r;  matrixOut[7] = b.g;  matrixOut[8] = b.b;
+
+  return matrixOut;
 }
 
 // ── Output space helpers ──────────────────────────────────────────

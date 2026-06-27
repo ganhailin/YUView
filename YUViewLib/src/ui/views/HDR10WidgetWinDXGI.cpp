@@ -107,7 +107,8 @@ cbuffer Constants : register(b0)
     float systemHandlesTonemapping;// 1.0 if system (HDR or ACM) does tonemapping — skip Reinhard
     // --- 16-byte boundary ---
     float debugOutput;             // 0=normal, 1=raw texture, 2=raw*10, 3=after EOTF
-    float3 padding;                // Pad to 48 bytes (multiple of 16 for D3D11)
+    int   premultipliedAlpha;      // 1 = source is premultiplied, 0 = shader premultiplies
+    float2 padding;                // Pad to 48 bytes (multiple of 16 for D3D11)
 };
 
 struct PS_INPUT
@@ -208,20 +209,27 @@ float4 main(PS_INPUT input) : SV_TARGET
 {
     // Sample the 16-bit texture (UNORM → 0..1)
     float4 texColor = hdrTexture.Sample(texSampler, input.uv);
+    float alpha = texColor.a;
+
+    // Premultiply in encoding domain if source is non-premultiplied.
+    // This must happen before EOTF for gamma/sRGB-encoded content.
+    if (premultipliedAlpha == 0) {
+        texColor.rgb *= alpha;
+    }
 
     // DEBUG: passthrough mode - output raw texture values directly
     // Set debugOutput via constant buffer: 0=normal, 1=raw, 2=raw*10, 3=after EOTF
     if (debugOutput > 0.5f && debugOutput < 1.5f)
         return texColor;
     if (debugOutput > 1.5f && debugOutput < 2.5f)
-        return float4(texColor.rgb * 10.0, 1.0);
+        return float4(texColor.rgb * 10.0, alpha);
 
     // Apply EOTF: coded value → linear light
     float3 linColor = applyEOTF(texColor.rgb);
 
     // DEBUG: output after EOTF only
     if (debugOutput > 2.5f && debugOutput < 3.5f)
-        return float4(linColor, 1.0);
+        return float4(linColor, alpha);
 
     // Apply color gamut conversion
     linColor = applyGamutConversion(linColor);
@@ -265,7 +273,7 @@ float4 main(PS_INPUT input) : SV_TARGET
             output *= mappedLum / luminance;
     }
 
-    return float4(output, 1.0f);
+    return float4(output, alpha);
 }
 )";
 
@@ -322,7 +330,8 @@ struct ConstantBuffer
   float systemHandlesTonemapping;  // offset 28
   // --- 16-byte boundary (offset 32) ---
   float debugOutput;               // offset 32
-  float padding[3];                // offset 36-47, pad to 48 bytes (3×16)
+  int   premultipliedAlpha;        // offset 36
+  float padding[2];                // offset 40-47, pad to 48 bytes (3×16)
 };
 
 struct ViewConstantBuffer
@@ -546,6 +555,20 @@ void HDR10WidgetWinDXGI::initD3D()
   blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
   device->CreateBlendState(&blendDesc, &m_overlayBlendState);
 
+  // ── HDR pipeline blend state (premultiplied alpha) ──────────────
+  // The shader premultiplies RGB by alpha in the encoding domain.
+  // Blend: src * 1 + dst * (1 - srcAlpha), matching OpenGL and Metal paths.
+  D3D11_BLEND_DESC hdrBlendDesc = {};
+  hdrBlendDesc.RenderTarget[0].BlendEnable = TRUE;
+  hdrBlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+  hdrBlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+  hdrBlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+  hdrBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+  hdrBlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+  hdrBlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+  hdrBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+  device->CreateBlendState(&hdrBlendDesc, &m_hdrBlendState);
+
   // ── Input layout ─────────────────────────────────────────────────
 
   D3D11_INPUT_ELEMENT_DESC layout[] = {
@@ -738,6 +761,7 @@ void HDR10WidgetWinDXGI::render()
   bool isHDREOTF = (m_eotf == video::HDR10_EOTF::PQ || m_eotf == video::HDR10_EOTF::HLG);
   cb.systemHandlesTonemapping = (caps.systemHandlesTonemapping || !isHDREOTF) ? 1.0f : 0.0f;
   cb.debugOutput              = m_debugOutput;
+  cb.premultipliedAlpha       = m_premultipliedAlpha ? 1 : 0;
 
   D3D11_MAPPED_SUBRESOURCE mapped;
   if (SUCCEEDED(ctx->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
@@ -818,6 +842,10 @@ void HDR10WidgetWinDXGI::render()
   vp.MinDepth = 0.0f;
   vp.MaxDepth = 1.0f;
   ctx->RSSetViewports(1, &vp);
+
+  // Enable premultiplied alpha blending for HDR content
+  FLOAT blendFactor[4] = {0, 0, 0, 0};
+  ctx->OMSetBlendState(m_hdrBlendState.Get(), blendFactor, 0xFFFFFFFF);
 
   ctx->Draw(4, 0);
 

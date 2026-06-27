@@ -35,6 +35,7 @@
 #include <QPainter>
 #include <QSettings>
 #include <QColorSpace>
+#include <QSurfaceFormat>
 
 #include <common/FunctionsGui.h>
 
@@ -241,19 +242,28 @@ void videoHandler::drawFrame(QPainter *painter, int frameIdx, double zoomFactor,
   // Ensure the image has an sRGB color space tag, then convert to display color space
   if (!imgToDraw.colorSpace().isValid())
     imgToDraw.setColorSpace(QColorSpace::SRgb);
-  QColorSpace displayCS = functionsGui::getDisplayColorSpace();
+  QColorSpace displayCS = QColorSpace::SRgb;
+  if (QSurfaceFormat::defaultFormat().colorSpace() != QColorSpace::SRgb)
+    displayCS = functionsGui::getDisplayColorSpace();
   if (displayCS.isValid() && displayCS != QColorSpace::SRgb)
     imgToDraw = imgToDraw.convertedToColorSpace(displayCS);
 
+  // Premultiplied alpha handling.
+  // On Windows, platformImageFormat returns Format_ARGB32_Premultiplied, so the
+  // data is already premultiplied at creation time — draw directly.
+  // On macOS, platformImageFormat returns Format_ARGB32 (non-premultiplied).
+  // When the premultiplied setting is enabled, we re-tag the format to
+  // Format_ARGB32_Premultiplied WITHOUT converting (the data is assumed to be
+  // already premultiplied by the source). Using convertedTo() would double-premultiply.
   QSettings premulSettings;
   bool premul = premulSettings.value("View/PremultipliedAlpha", true).toBool();
-  if (premul && imgToDraw.hasAlphaChannel() &&
-      imgToDraw.format() == QImage::Format_ARGB32)
+  auto src_format = premul ? QImage::Format_ARGB32_Premultiplied : QImage::Format_ARGB32;
+  if (imgToDraw.hasAlphaChannel() && src_format != imgToDraw.format())
   {
-    // Re-tag as premultiplied without copying/converting data.
-    QImage premulImage(imgToDraw.bits(), imgToDraw.width(), imgToDraw.height(),
-                       imgToDraw.bytesPerLine(), QImage::Format_ARGB32_Premultiplied);
-    painter->drawImage(videoRect, premulImage);
+      // Re-tag as premultiplied without copying/converting data.
+      QImage premulImage(imgToDraw.bits(), imgToDraw.width(), imgToDraw.height(),
+                         imgToDraw.bytesPerLine(), src_format);
+      painter->drawImage(videoRect, premulImage);
   }
   else
   {

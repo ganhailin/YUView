@@ -14,13 +14,14 @@ SOURCES += $$files(src/*.cpp, true)
 HEADERS += $$files(src/*.h, true)
 
 # macOS: include Objective-C++ Metal renderer source
+# Note: FunctionsGuiColorSpace.cpp is already picked up by the glob above.
+# On macOS, it is guarded by #ifndef Q_OS_MAC so it compiles to an empty TU,
+# and the .mm version is used instead.
 macx {
     SOURCES += src/ui/views/MacEDRRenderer.mm \
                src/ui/views/MacEDRUtil.mm \
                src/common/FunctionsGuiColorSpace.mm
     LIBS += -framework Metal -framework MetalKit -framework QuartzCore -framework Cocoa
-} else {
-    SOURCES += src/common/FunctionsGuiColorSpace.cpp
 }
 
 FORMS += $$files(ui/*.ui, false)

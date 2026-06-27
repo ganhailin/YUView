@@ -69,6 +69,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
       settings.value("SavePositionAndZoomPerItem", false).toBool());
   ui.checkBoxAutodetectFileType->setChecked(settings.value("AutodetectFileType", true).toBool());
   ui.checkBoxPremultipliedAlpha->setChecked(settings.value("View/PremultipliedAlpha", true).toBool());
+  ui.checkBoxSRGBColorSpace->setChecked(settings.value("View/UseSRGBColorSpace", false).toBool());
 
   settings.beginGroup("updates");
   const auto checkForUpdates = settings.value("checkForUpdates", true).toBool();
@@ -458,6 +459,7 @@ void SettingsDialog::on_pushButtonSave_clicked()
   settings.setValue("SavePositionAndZoomPerItem", ui.checkBoxSavePositionPerItem->isChecked());
   settings.setValue("AutodetectFileType", ui.checkBoxAutodetectFileType->isChecked());
   settings.setValue("View/PremultipliedAlpha", ui.checkBoxPremultipliedAlpha->isChecked());
+  settings.setValue("View/UseSRGBColorSpace", ui.checkBoxSRGBColorSpace->isChecked());
 
   settings.beginGroup("updates");
   settings.setValue("checkForUpdates", ui.groupBoxUpdates->isChecked());

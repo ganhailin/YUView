@@ -239,6 +239,8 @@ void splitViewWidget::applyColorSettingsToWidgets()
     hdr10WidgetWin->setGammaValue(m_colorGamma);
     hdr10WidgetWin->setDiffuseWhiteNits(m_colorDiffuseWhite);
     hdr10WidgetWin->setHDRBrightness(m_colorBrightness);
+    hdr10WidgetWin->setPremultipliedAlpha(
+        settings.value("View/PremultipliedAlpha", true).toBool());
   }
 #endif
 }
