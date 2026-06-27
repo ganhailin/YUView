@@ -16,53 +16,16 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Must include QtGlobal first for Q_OS_MAC
-#include <QtGlobal>
-
 #include "FunctionsGui.h"
 
-#ifdef Q_OS_MAC
-
-#include <QGuiApplication>
-#include <QScreen>
 #include <QColorSpace>
-
-#include <qscreen_platform.h>
-
-// Avoid MacTypes.h Size conflict with video::Size
-#define Size MacSize
-#import <Cocoa/Cocoa.h>
-#undef Size
 
 namespace functionsGui {
 
 QColorSpace getDisplayColorSpace()
 {
-  auto *screen = QGuiApplication::primaryScreen();
-  if (!screen)
-    return QColorSpace::SRgb;
-
-  auto *cocoaScreen = screen->nativeInterface<QNativeInterface::QCocoaScreen>();
-  if (!cocoaScreen)
-    return QColorSpace::SRgb;
-
-  NSScreen *nsScreen = cocoaScreen->nativeScreen();
-  if (!nsScreen || !nsScreen.colorSpace)
-    return QColorSpace::SRgb;
-
-  // Try to get ICC profile data from the screen's color space
-  NSData *iccData = [nsScreen.colorSpace ICCProfileData];
-  if (iccData && iccData.length > 0)
-  {
-    QByteArray iccBytes(reinterpret_cast<const char *>(iccData.bytes), int(iccData.length));
-    auto cs = QColorSpace::fromIccProfile(iccBytes);
-    if (cs.isValid())
-      return cs;
-  }
-
+  // On non-macOS platforms, return sRGB as the default display color space.
   return QColorSpace::SRgb;
 }
 
 } // namespace functionsGui
-
-#endif // Q_OS_MAC

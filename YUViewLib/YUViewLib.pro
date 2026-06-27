@@ -19,6 +19,8 @@ macx {
                src/ui/views/MacEDRUtil.mm \
                src/common/FunctionsGuiColorSpace.mm
     LIBS += -framework Metal -framework MetalKit -framework QuartzCore -framework Cocoa
+} else {
+    SOURCES += src/common/FunctionsGuiColorSpace.cpp
 }
 
 FORMS += $$files(ui/*.ui, false)
