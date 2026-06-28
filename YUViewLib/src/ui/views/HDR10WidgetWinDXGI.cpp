@@ -807,16 +807,18 @@ void HDR10WidgetWinDXGI::render()
     ctx->Unmap(m_viewConstantBuffer.Get(), 0);
   }
 
-  // Clear to background color (same as SplitViewWidget / OpenGL HDR10Widget)
-  // Background color is sRGB, convert to linear for scRGB
+  // ── Clear to background color ────────────────────────────────────
+  // Always clear, even when there's no texture (e.g. no file selected).
+  // Background color is sRGB, convert to linear, then scale to scRGB absolute luminance.
   QSettings settings;
-  QColor bgColor = settings.value("View/BackgroundColor", QColor(140, 140, 140)).value<QColor>();
+  QColor bgColor = settings.value("View/BackgroundColor", QColor(35, 35, 35)).value<QColor>();
   auto srgbToLinear = [](float c) -> float {
     return (c <= 0.04045f) ? (c / 12.92f) : powf((c + 0.055f) / 1.055f, 2.4f);
   };
-  float bgR = srgbToLinear((float)bgColor.redF());
-  float bgG = srgbToLinear((float)bgColor.greenF());
-  float bgB = srgbToLinear((float)bgColor.blueF());
+  float bgScale = caps.sdrWhiteNits / 80.0f;
+  float bgR = srgbToLinear((float)bgColor.redF()) * bgScale;
+  float bgG = srgbToLinear((float)bgColor.greenF()) * bgScale;
+  float bgB = srgbToLinear((float)bgColor.blueF()) * bgScale;
   m_swapChain->beginFrame(bgR, bgG, bgB);
 
   // Pipeline

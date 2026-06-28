@@ -1797,6 +1797,11 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
     if (hdr10Widget)
       hdr10Widget->show();
 #endif
+#ifdef Q_OS_WIN
+  } else if (hdrRenderingMode == HDRRenderingMode::DXGI && hdr10WidgetWin) {
+    hdr10WidgetWin->show();
+    hdr10WidgetWin->raise();
+#endif
   }
 
   QSettings settings;
