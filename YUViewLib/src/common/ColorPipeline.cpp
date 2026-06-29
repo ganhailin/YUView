@@ -97,15 +97,44 @@ const float *getGamutMatrix(ColorGamut source, ColorGamut target)
   }
 }
 
-static QColorSpace::Primaries gamutToPrimaries(ColorGamut g)
+// BT.2020 chromaticity coordinates (CIE 1931 xy) — Qt 5 has no Bt2020 enum
+static const QPointF BT2020_WHITE(0.3127f,  0.3290f);
+static const QPointF BT2020_RED  (0.708f,   0.292f);
+static const QPointF BT2020_GREEN(0.170f,   0.797f);
+static const QPointF BT2020_BLUE (0.131f,   0.046f);
+
+/// Build a QColorSpace with the given gamut and Linear transfer function.
+static QColorSpace makeLinearColorSpace(ColorGamut g)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+  // Qt 6: all standard gamuts have dedicated Primaries enum values
+  QColorSpace::Primaries p;
   switch (g)
   {
-    case ColorGamut::BT2020: return QColorSpace::Primaries::Bt2020;
-    case ColorGamut::BT709:  return QColorSpace::Primaries::SRgb;
-    case ColorGamut::P3:     return QColorSpace::Primaries::DciP3D65;
-    default:                 return QColorSpace::Primaries::SRgb;
+    case ColorGamut::BT2020: p = QColorSpace::Primaries::Bt2020;  break;
+    case ColorGamut::BT709:  p = QColorSpace::Primaries::SRgb;    break;
+    case ColorGamut::P3:     p = QColorSpace::Primaries::DciP3D65; break;
+    default:                 p = QColorSpace::Primaries::SRgb;    break;
   }
+  return QColorSpace(p, QColorSpace::TransferFunction::Linear);
+#else
+  // Qt 5: no Bt2020 enum — use chromaticity coordinates for BT.2020
+  switch (g)
+  {
+    case ColorGamut::BT2020:
+      return QColorSpace(BT2020_WHITE, BT2020_RED, BT2020_GREEN, BT2020_BLUE,
+                         QColorSpace::TransferFunction::Linear);
+    case ColorGamut::BT709:
+      return QColorSpace(QColorSpace::Primaries::SRgb,
+                         QColorSpace::TransferFunction::Linear);
+    case ColorGamut::P3:
+      return QColorSpace(QColorSpace::Primaries::DciP3D65,
+                         QColorSpace::TransferFunction::Linear);
+    default:
+      return QColorSpace(QColorSpace::Primaries::SRgb,
+                         QColorSpace::TransferFunction::Linear);
+  }
+#endif
 }
 
 /// Get gamut matrix for a display QColorSpace (handles Custom primaries).
@@ -135,15 +164,28 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
   // Custom primaries — compute matrix from Qt color transform.
   // Both source and target must use Linear transfer function so the
   // transform only handles primaries/chromatic adaptation, not encoding.
-  QColorSpace srcCS(gamutToPrimaries(source),
-                    QColorSpace::TransferFunction::Linear);
-  QColorSpace dstCS(display.primaries(),
-                    QColorSpace::TransferFunction::Linear);
+  QColorSpace srcCS = makeLinearColorSpace(source);
+
+  // Target: if display has standard primaries use the enum, otherwise
+  // keep its (possibly ICC-derived) custom primaries with Linear transfer.
+  QColorSpace dstCS;
+  if (primaries == QColorSpace::Primaries::Custom)
+  {
+    dstCS = QColorSpace(display);
+    dstCS.setTransferFunction(QColorSpace::TransferFunction::Linear);
+  }
+  else
+  {
+    dstCS = QColorSpace(primaries, QColorSpace::TransferFunction::Linear);
+  }
+
   QColorTransform xform = srcCS.transformationToColorSpace(dstCS);
 
-  // Map RGB unit vectors to build the 3×3 matrix
-  auto mapFloat = [&](float r, float g, float b) -> QRgbaFloat32 {
-    return xform.map(QRgbaFloat32{r, g, b, 1.0f});
+  // Map RGB unit vectors to build the 3×3 matrix.
+  // QColor stores float components internally, so values > 1.0
+  // (common for wide-gamut → narrow-gamut conversion) are preserved.
+  auto mapFloat = [&](float r, float g, float b) {
+    return xform.map(QColor::fromRgbF(qreal(r), qreal(g), qreal(b)));
   };
 
   auto r = mapFloat(1.0f, 0.0f, 0.0f);
@@ -151,9 +193,9 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
   auto b = mapFloat(0.0f, 0.0f, 1.0f);
 
   // Row-major 3×3: each basis vector is a column
-  matrixOut[0] = r.r;  matrixOut[1] = g.r;  matrixOut[2] = b.r;
-  matrixOut[3] = r.g;  matrixOut[4] = g.g;  matrixOut[5] = b.g;
-  matrixOut[6] = r.b;  matrixOut[7] = g.b;  matrixOut[8] = b.b;
+  matrixOut[0] = float(r.redF());   matrixOut[1] = float(g.redF());   matrixOut[2] = float(b.redF());
+  matrixOut[3] = float(r.greenF()); matrixOut[4] = float(g.greenF()); matrixOut[5] = float(b.greenF());
+  matrixOut[6] = float(r.blueF());  matrixOut[7] = float(g.blueF());  matrixOut[8] = float(b.blueF());
 
   return matrixOut;
 }
