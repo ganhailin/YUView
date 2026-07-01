@@ -43,6 +43,7 @@
 #include <windowsx.h>
 
 #include <video/yuv/videoHandlerYUV.h>
+#include <common/ColorPipeline.h>
 
 #include <cmath>
 #include <cstdint>
@@ -97,18 +98,22 @@ SamplerState texSampler : register(s0);
 cbuffer Constants : register(b0)
 {
     int   eotf;                    // HDR10_EOTF enum: 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
-    int   colorGamut;              // HDR10_ColorGamut enum: 0=BT2020, 1=BT709, 2=P3
     float gammaValue;              // Gamma exponent (only when eotf=2)
     float diffuseWhiteNits;        // Diffuse white reference (nits) from user settings
-    // --- 16-byte boundary ---
     float hdrBrightness;           // HDR brightness multiplier
+    // --- 16-byte boundary (offset 16) ---
     float sdrWhiteNits;            // Windows system SDR white level in nits (scRGB 1.0 = this)
     float hdrActive;               // 1.0 if HDR active
     float systemHandlesTonemapping;// 1.0 if system (HDR or ACM) does tonemapping — skip Reinhard
-    // --- 16-byte boundary ---
     float debugOutput;             // 0=normal, 1=raw texture, 2=raw*10, 3=after EOTF
+    // --- 16-byte boundary (offset 32) ---
     int   premultipliedAlpha;      // 1 = source is premultiplied, 0 = shader premultiplies
-    float2 padding;                // Pad to 48 bytes (multiple of 16 for D3D11)
+    float3 _pad;                   // pad to 16-byte boundary before matrix
+    // --- 16-byte boundary (offset 48) ---
+    // Gamut conversion matrix (source to BT.709, row-major 3x3).
+    // HLSL float3x3 occupies 3 float4 slots (48 bytes, row-major).
+    // C++ uploads via packGamutMatrixForHLSL() as float[12].
+    float3x3 gamutMatrix;          // offset 48-95
 };
 
 struct PS_INPUT
@@ -180,27 +185,14 @@ float3 applyEOTF(float3 coded)
     return sRGBToLinear(coded);                    // sRGB
 }
 
-// ── Color gamut conversion matrices ────────────────────────────────
-
-// BT.2020 → BT.709 (scRGB native primaries, via XYZ D65)
-static const float3x3 BT2020toBT709 = {
-     1.6604900368e+00f, -5.8763847956e-01f, -7.2851557227e-02f,
-    -1.2455039399e-01f,  1.1328984194e+00f, -8.3480253896e-03f,
-    -1.8151044561e-02f, -1.0057861035e-01f,  1.1187296549e+00f
-};
-
-// Display P3 → BT.709 (scRGB native primaries, via XYZ D65)
-static const float3x3 P3toBT709 = {
-     1.2249389281e+00f, -2.2493772528e-01f, -2.2415925081e-06f,
-    -4.2055920309e-02f,  1.0420564505e+00f,  1.3042267039e-06f,
-    -1.9637885940e-02f, -7.8636645004e-02f,  1.0982732700e+00f
-};
+// BT.2020 to BT.709 and P3 to BT.709 matrices are now provided via cbuffer
+// (gamutMatrixRow0/1/2) and applied unconditionally in applyGamutConversion().
 
 float3 applyGamutConversion(float3 linColor)
 {
-    if (colorGamut == 0) return mul(BT2020toBT709, linColor);  // BT.2020 → BT.709
-    if (colorGamut == 2) return mul(P3toBT709, linColor);      // P3 → BT.709
-    return linColor;                                            // BT.709 → passthrough
+    // gamutMatrix is row-major (uploaded via packGamutMatrixForHLSL).
+    // HLSL mul(M, v) = M·v (matrix × column vector).
+    return mul(gamutMatrix, linColor);
 }
 
 // ── Main ──────────────────────────────────────────────────────────
@@ -320,19 +312,46 @@ static const Vertex g_quadVertices[] = {
 struct ConstantBuffer
 {
   int   eotf;                      // offset 0
-  int   colorGamut;                // offset 4
-  float gammaValue;                // offset 8
-  float diffuseWhiteNits;          // offset 12
+  float gammaValue;                // offset 4
+  float diffuseWhiteNits;          // offset 8
+  float hdrBrightness;             // offset 12
   // --- 16-byte boundary (offset 16) ---
-  float hdrBrightness;             // offset 16
-  float sdrWhiteNits;              // offset 20
-  float hdrActive;                 // offset 24
-  float systemHandlesTonemapping;  // offset 28
+  float sdrWhiteNits;              // offset 16
+  float hdrActive;                 // offset 20
+  float systemHandlesTonemapping;  // offset 24
+  float debugOutput;               // offset 28
   // --- 16-byte boundary (offset 32) ---
-  float debugOutput;               // offset 32
-  int   premultipliedAlpha;        // offset 36
-  float padding[2];                // offset 40-47, pad to 48 bytes (3×16)
+  int   premultipliedAlpha;        // offset 32
+  float _pad[3];                   // offset 36-47, align matrix to 16-byte boundary
+  // --- 16-byte boundary (offset 48) ---
+  // Gamut matrix packed for HLSL float3x3 (row-major, 3 float4 slots).
+  // packGamutMatrixForHLSL() writes the flat float[9] as
+  // [row0.xyz, 0, row1.xyz, 0, row2.xyz, 0].
+  float gamutMatrixPacked[12];     // offset 48-95
 };
+
+/// Repack a flat row-major float[9] gamut matrix into the HLSL cbuffer
+/// layout: 3 float3 row vectors, each occupying a 16-byte slot.
+/// @param flatMatrix  9 floats, row-major (row 0 = [0..2], etc.)
+/// @param packedOut   12 floats output (3 rows × 4, last float per row unused)
+static void packGamutMatrixForHLSL(const float flatMatrix[9], float packedOut[12])
+{
+  // Row 0
+  packedOut[0] = flatMatrix[0];
+  packedOut[1] = flatMatrix[1];
+  packedOut[2] = flatMatrix[2];
+  packedOut[3] = 0.0f;
+  // Row 1
+  packedOut[4] = flatMatrix[3];
+  packedOut[5] = flatMatrix[4];
+  packedOut[6] = flatMatrix[5];
+  packedOut[7] = 0.0f;
+  // Row 2
+  packedOut[8] = flatMatrix[6];
+  packedOut[9] = flatMatrix[7];
+  packedOut[10] = flatMatrix[8];
+  packedOut[11] = 0.0f;
+}
 
 struct ViewConstantBuffer
 {
@@ -748,7 +767,6 @@ void HDR10WidgetWinDXGI::render()
 
   ConstantBuffer cb{};
   cb.eotf                     = static_cast<int>(m_eotf);
-  cb.colorGamut               = static_cast<int>(m_colorGamut);
   cb.gammaValue               = m_gammaValue;
   cb.diffuseWhiteNits         = m_diffuseWhiteNits;
   cb.hdrBrightness            = m_hdrBrightness;
@@ -762,6 +780,18 @@ void HDR10WidgetWinDXGI::render()
   cb.systemHandlesTonemapping = (caps.systemHandlesTonemapping || !isHDREOTF) ? 1.0f : 0.0f;
   cb.debugOutput              = m_debugOutput;
   cb.premultipliedAlpha       = m_premultipliedAlpha ? 1 : 0;
+
+  // Gamut matrix: source to BT.709 (scRGB native primaries).
+  // DXGI scRGB swap chain always uses BT.709 primaries regardless of the
+  // display -- the OS compositor handles scRGB to display conversion.
+  // The matrix is row-major (3 rows x 3 cols). The HLSL cbuffer uses
+  // 3 float3 row vectors (each in a 16-byte slot), so we repack the
+  // flat float[9] into that layout before upload.
+  const float *gamutMat = color::getGamutMatrix(
+      m_colorGamut, color::ColorGamut::BT709);
+  float packedMatrix[12];
+  packGamutMatrixForHLSL(gamutMat, packedMatrix);
+  memcpy(cb.gamutMatrixPacked, packedMatrix, 12 * sizeof(float));
 
   D3D11_MAPPED_SUBRESOURCE mapped;
   if (SUCCEEDED(ctx->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
