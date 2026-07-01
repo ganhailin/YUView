@@ -35,6 +35,8 @@
 
 #include <QDebug>
 
+#include <common/FunctionsGui.h>
+
 #include <windows.h>
 #include <winuser.h>
 
@@ -304,16 +306,17 @@ bool DXGISwapChain::detectHDRCapabilities()
     qWarning() << "[DXGISwapChain] IDXGIOutput6 not available, HDR detection not supported";
   }
 
-  // ── ACM detection via DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO ──
-  // IDXGIOutput6::GetDesc1() reports hardware caps that don't change with ACM
-  // toggle. The real indicator is the AdvancedColorEnabled bit from
-  // DISPLAYCONFIG_ADVANCED_COLOR_INFO (type 9), which reflects the actual
-  // compositor state. We query it in the SDR white level section below and
-  // set acmActive + systemHandlesTonemapping there.
+  // ── ACM detection: delegated to shared functionsGui::isWindowsACMEnabled() ──
+  // Uses DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO (type 9), same API
+  // as the inline code below would use.  Shared with the OpenGL HDR10Widget path.
   m_caps.acmActive = false;
   m_caps.systemHandlesTonemapping = m_caps.hdrActive;
 
-  // ── Get Windows SDR white level + Advanced Color state ──
+  bool acEnabled = functionsGui::isWindowsACMEnabled();
+  m_caps.acmActive = acEnabled && !m_caps.hdrActive;
+  m_caps.systemHandlesTonemapping = m_caps.hdrActive || m_caps.acmActive;
+
+  // ── Get Windows SDR white level ──
   UINT32 pathCount, modeCount;
   if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATH, &pathCount, &modeCount) == ERROR_SUCCESS)
   {
@@ -331,28 +334,6 @@ bool DXGISwapChain::detectHDRCapabilities()
       if (DisplayConfigGetDeviceInfo(&sdrLevel.header) == ERROR_SUCCESS && sdrLevel.SDRWhiteLevel > 0)
       {
         m_caps.sdrWhiteNits = (sdrLevel.SDRWhiteLevel / 1000.0f) * 80.0f;
-      }
-
-      // ── Query DISPLAYCONFIG_ADVANCED_COLOR_INFO (type 9) ──
-      // AdvancedColorEnabled (bit 1) indicates the display is in Advanced Color
-      // mode — either HDR or ACM SDR. In both cases the system compositor
-      // handles color management and tonemapping, so we skip Reinhard.
-      struct {
-        DISPLAYCONFIG_DEVICE_INFO_HEADER header;
-        UINT32 value;
-        UINT32 colorEncoding;
-        UINT32 bitsPerColorChannel;
-      } acInfo = {};
-      acInfo.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(9);
-      acInfo.header.size = sizeof(acInfo);
-      acInfo.header.adapterId = paths[0].targetInfo.adapterId;
-      acInfo.header.id = paths[0].targetInfo.id;
-
-      if (DisplayConfigGetDeviceInfo(&acInfo.header) == ERROR_SUCCESS)
-      {
-        bool acmEnabled = (acInfo.value & 0x2) != 0;
-        m_caps.acmActive = acmEnabled && !m_caps.hdrActive;
-        m_caps.systemHandlesTonemapping = m_caps.hdrActive || m_caps.acmActive;
       }
 
       qInfo() << "[DXGISwapChain] HDR:" << m_caps.hdrActive

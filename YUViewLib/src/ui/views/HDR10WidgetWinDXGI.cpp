@@ -44,6 +44,7 @@
 
 #include <video/yuv/videoHandlerYUV.h>
 #include <common/ColorPipeline.h>
+#include <common/FunctionsGui.h>
 
 #include <cmath>
 #include <cstdint>
@@ -110,9 +111,9 @@ cbuffer Constants : register(b0)
     int   premultipliedAlpha;      // 1 = source is premultiplied, 0 = shader premultiplies
     float3 _pad;                   // pad to 16-byte boundary before matrix
     // --- 16-byte boundary (offset 48) ---
-    // Gamut conversion matrix (source to BT.709, row-major 3x3).
-    // HLSL float3x3 occupies 3 float4 slots (48 bytes, row-major).
-    // C++ uploads via packGamutMatrixForHLSL() as float[12].
+    // Gamut conversion matrix (row-major from C++, packed column-major for HLSL).
+    // When system handles color (HDR or ACM): source → BT.709, compositor does the rest.
+    // When system is off: source → display gamut, we do it ourselves.
     float3x3 gamutMatrix;          // offset 48-95
 };
 
@@ -185,12 +186,12 @@ float3 applyEOTF(float3 coded)
     return sRGBToLinear(coded);                    // sRGB
 }
 
-// BT.2020 to BT.709 and P3 to BT.709 matrices are now provided via cbuffer
-// (gamutMatrixRow0/1/2) and applied unconditionally in applyGamutConversion().
+// Gamut conversion matrix is uploaded via cbuffer (gamutMatrix) and applied
+// unconditionally in applyGamutConversion() — no static matrices needed.
 
 float3 applyGamutConversion(float3 linColor)
 {
-    // gamutMatrix is row-major (uploaded via packGamutMatrixForHLSL).
+    // gamutMatrix is uploaded column-major (via packGamutMatrixForHLSL).
     // HLSL mul(M, v) = M·v (matrix × column vector).
     return mul(gamutMatrix, linColor);
 }
@@ -324,31 +325,34 @@ struct ConstantBuffer
   int   premultipliedAlpha;        // offset 32
   float _pad[3];                   // offset 36-47, align matrix to 16-byte boundary
   // --- 16-byte boundary (offset 48) ---
-  // Gamut matrix packed for HLSL float3x3 (row-major, 3 float4 slots).
-  // packGamutMatrixForHLSL() writes the flat float[9] as
-  // [row0.xyz, 0, row1.xyz, 0, row2.xyz, 0].
+  // Gamut matrix packed for HLSL float3x3 (column-major, 3 float4 slots).
+  // packGamutMatrixForHLSL() writes the flat float[9] column-wise as
+  // [col0.xyz, 0, col1.xyz, 0, col2.xyz, 0].
   float gamutMatrixPacked[12];     // offset 48-95
 };
 
 /// Repack a flat row-major float[9] gamut matrix into the HLSL cbuffer
-/// layout: 3 float3 row vectors, each occupying a 16-byte slot.
+/// layout: HLSL float3x3 is column-major (3 columns × 4 floats each).
+/// flatMatrix is row-major: flatMatrix[row*3+col].
+/// We write COLUMN-wise so HLSL's internal column-major representation
+/// matches the mathematical M (no transpose).
 /// @param flatMatrix  9 floats, row-major (row 0 = [0..2], etc.)
-/// @param packedOut   12 floats output (3 rows × 4, last float per row unused)
+/// @param packedOut   12 floats output (3 columns × 4, last float per col unused)
 static void packGamutMatrixForHLSL(const float flatMatrix[9], float packedOut[12])
 {
-  // Row 0
+  // Column 0 (red mapping): flatMatrix[0], flatMatrix[3], flatMatrix[6]
   packedOut[0] = flatMatrix[0];
-  packedOut[1] = flatMatrix[1];
-  packedOut[2] = flatMatrix[2];
+  packedOut[1] = flatMatrix[3];
+  packedOut[2] = flatMatrix[6];
   packedOut[3] = 0.0f;
-  // Row 1
-  packedOut[4] = flatMatrix[3];
+  // Column 1 (green mapping): flatMatrix[1], flatMatrix[4], flatMatrix[7]
+  packedOut[4] = flatMatrix[1];
   packedOut[5] = flatMatrix[4];
-  packedOut[6] = flatMatrix[5];
+  packedOut[6] = flatMatrix[7];
   packedOut[7] = 0.0f;
-  // Row 2
-  packedOut[8] = flatMatrix[6];
-  packedOut[9] = flatMatrix[7];
+  // Column 2 (blue mapping): flatMatrix[2], flatMatrix[5], flatMatrix[8]
+  packedOut[8] = flatMatrix[2];
+  packedOut[9] = flatMatrix[5];
   packedOut[10] = flatMatrix[8];
   packedOut[11] = 0.0f;
 }
@@ -781,14 +785,27 @@ void HDR10WidgetWinDXGI::render()
   cb.debugOutput              = m_debugOutput;
   cb.premultipliedAlpha       = m_premultipliedAlpha ? 1 : 0;
 
-  // Gamut matrix: source to BT.709 (scRGB native primaries).
-  // DXGI scRGB swap chain always uses BT.709 primaries regardless of the
-  // display -- the OS compositor handles scRGB to display conversion.
-  // The matrix is row-major (3 rows x 3 cols). The HLSL cbuffer uses
-  // 3 float3 row vectors (each in a 16-byte slot), so we repack the
-  // flat float[9] into that layout before upload.
-  const float *gamutMat = color::getGamutMatrix(
-      m_colorGamut, color::ColorGamut::BT709);
+  // Gamut matrix: source → display (or source → BT.709 when system handles it).
+  //   System handles (HDR or ACM): target = BT.709 — compositor maps to display
+  //   System off: target = display's actual gamut — we do it ourselves
+  float customMatrix[9];
+  const float *gamutMat;
+  if (caps.systemHandlesTonemapping)
+  {
+    gamutMat = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+  }
+  else
+  {
+    auto displayCS = functionsGui::getDisplayColorSpace();
+    if (displayCS.isValid())
+    {
+      gamutMat = color::getGamutMatrixForDisplay(m_colorGamut, displayCS, customMatrix);
+    }
+    else
+    {
+      gamutMat = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+    }
+  }
   float packedMatrix[12];
   packGamutMatrixForHLSL(gamutMat, packedMatrix);
   memcpy(cb.gamutMatrixPacked, packedMatrix, 12 * sizeof(float));
