@@ -85,6 +85,14 @@ public:
   bool supports10bit() const { return m_supports10bit; }
   QString getOpenGLInfo() const { return m_openglInfo; }
 
+signals:
+  /// Emitted when the system color management state changes.
+  /// On Windows, reflects ACM (Auto Color Management) status.
+  /// hdrActive is always false for the OpenGL path (no HDR via QOpenGLWidget).
+  /// systemHandlesTonemapping is true when ACM is active.
+  void hdrStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
+                        float maxNits, float sdrWhiteNits);
+
 protected:
   void initializeGL() override;
   void resizeGL(int w, int h) override;
@@ -138,6 +146,9 @@ private:
   float            m_diffuseWhiteNits{203.0f};
   float            m_hdrBrightness{1.0f};
   bool             m_premultipliedAlpha{true};
+
+  // ACM state tracking for status dock updates
+  bool             m_lastAcmActive{false};
 
 
   double m_zoom{1.0};

@@ -341,6 +341,10 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
       hdr10Widget->setDithering(ditheringEnabled);
       hdr10Widget->setPremultipliedAlpha(
           ditherSettings.value("View/PremultipliedAlpha", true).toBool());
+
+      // Forward ACM/HDR status from OpenGL widget to dock
+      connect(hdr10Widget.get(), &video::HDR10Widget::hdrStatusChanged,
+              this, &splitViewWidget::hdrStatusChanged);
     }
 
 #ifdef Q_OS_MAC

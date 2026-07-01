@@ -475,13 +475,27 @@ void HDR10Widget::paintGL()
   // The shader does sRGB OETF after gamut conversion, outputting sRGB-encoded
   // values in the display's gamut. This matches QPainter and EDR paths.
   //
+  // When Windows ACM is enabled, the OS compositor handles gamut mapping
+  // from sRGB to the display. We MUST output sRGB and let ACM do the work —
+  // any in-shader gamut conversion would be double-applied, causing clamping
+  // or oversaturation.
+  //
   // When the surface is already sRGB, skip the display color space query and
   // use BT.709 as the gamut target directly — no conversion is needed.
-  const bool surfaceIsSRGB =
-      (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
   float customMatrix[9];
   const float *matrixData;
-  if (surfaceIsSRGB)
+  const bool acmActive = functionsGui::isWindowsACMEnabled();
+
+  // Emit status change if ACM state toggled (for dock display)
+  if (acmActive != m_lastAcmActive)
+  {
+    m_lastAcmActive = acmActive;
+    // OpenGL path: hdrActive=false, systemHandlesTonemapping reflects ACM
+    emit hdrStatusChanged(false, acmActive, 0.0f, 0.0f);
+  }
+  const bool surfaceIsSRGB =
+      (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
+  if (acmActive || surfaceIsSRGB)
   {
     matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
   }

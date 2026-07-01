@@ -272,8 +272,13 @@ void HDRSettingsDock::setHDRInfo(bool hdrActive, bool systemHandlesTonemapping,
                .arg(maxNits, 0, 'f', 0)
                .arg(sdrWhiteNits, 0, 'f', 0);
   else if (systemHandlesTonemapping)
-    info = QString("SDR + ACM | System tonemapping | SDR White: %1 nits")
-               .arg(sdrWhiteNits, 0, 'f', 0);
+  {
+    if (sdrWhiteNits > 0.0f)
+      info = QString("SDR + ACM | System color mgmt | SDR White: %1 nits")
+                 .arg(sdrWhiteNits, 0, 'f', 0);
+    else
+      info = "SDR + ACM | System color mgmt";
+  }
   else
     info = "SDR (no ACM) | App tonemapping";
   m_labelHDRInfo->setText(info);
