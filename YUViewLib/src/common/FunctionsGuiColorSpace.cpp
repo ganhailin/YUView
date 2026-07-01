@@ -33,6 +33,8 @@
 
 namespace functionsGui {
 
+static QByteArray s_cachedIccData;
+
 QColorSpace getDisplayColorSpace()
 {
 #ifdef Q_OS_WIN
@@ -82,6 +84,9 @@ QColorSpace getDisplayColorSpace()
   }
   CloseHandle(hFile);
 
+  // Cache raw ICC bytes for Custom primaries parsing
+  s_cachedIccData = iccBytes;
+
   auto cs = QColorSpace::fromIccProfile(iccBytes);
   auto result = cs.isValid() ? cs : QColorSpace::SRgb;
 
@@ -102,6 +107,11 @@ QColorSpace getDisplayColorSpace()
 #else
   return QColorSpace::SRgb;
 #endif
+}
+
+const QByteArray &getCachedIccData()
+{
+  return s_cachedIccData;
 }
 
 } // namespace functionsGui

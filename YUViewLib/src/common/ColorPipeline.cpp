@@ -32,9 +32,14 @@
 #include "ColorPipeline.h"
 
 #include <cmath>
+#include <algorithm>
+#include <cstring>
 #include <QColorSpace>
 #include <QColorTransform>
+#include <QDebug>
 #include <QtGui/QtGui>
+
+#include <common/FunctionsGui.h>
 
 namespace video::color {
 
@@ -137,6 +142,176 @@ static QColorSpace makeLinearColorSpace(ColorGamut g)
 #endif
 }
 
+/// Check if two 3×3 float matrices are approximately equal
+static bool matricesEqual(const float *a, const float *b, float eps = 0.002f)
+{
+  for (int i = 0; i < 9; ++i)
+    if (std::abs(a[i] - b[i]) > eps)
+      return false;
+  return true;
+}
+
+// s15Fixed16Number: 32-bit = sign + 15.16 fixed point
+static float s15f16(uint8_t const *p)
+{
+  int32_t v = (int32_t(p[0]) << 24) | (int32_t(p[1]) << 16)
+            | (int32_t(p[2]) << 8)  | int32_t(p[3]);
+  return float(v) / 65536.0f;
+}
+
+/// Parse ICC profile to extract colorant (rXYZ/gXYZ/bXYZ) and white point
+/// (wtpt) tags. Returns true if all four tags were found.
+static bool parseIccPrimaries(const QByteArray &iccData,
+                              float rXYZ[3], float gXYZ[3],
+                              float bXYZ[3], float wXYZ[3])
+{
+  if (iccData.size() < 132)
+    return false;
+
+  auto read32 = [&](int off) -> uint32_t {
+    auto p = reinterpret_cast<const uint8_t *>(iccData.constData()) + off;
+    return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16)
+         | (uint32_t(p[2]) << 8)  | uint32_t(p[3]);
+  };
+
+  // Tag count at offset 128
+  uint32_t tagCount = read32(128);
+  qDebug() << "[ICC] file size:" << iccData.size() << "tag count:" << tagCount;
+  if (iccData.size() < 132 + int(tagCount) * 12)
+    return false;
+
+  bool foundR = false, foundG = false, foundB = false, foundW = false;
+  const uint32_t tagR = 0x7258595A; // 'rXYZ'
+  const uint32_t tagG = 0x6758595A; // 'gXYZ'
+  const uint32_t tagB = 0x6258595A; // 'bXYZ'
+  const uint32_t tagW = 0x77747074; // 'wtpt'
+
+  for (uint32_t i = 0; i < tagCount; ++i)
+  {
+    int off = 132 + int(i) * 12;
+    uint32_t sig  = read32(off);
+    uint32_t dataOff = read32(off + 4);
+    uint32_t dataSize = read32(off + 8);
+
+    if (sig == tagR && dataOff + 20 <= uint32_t(iccData.size()))
+    {
+      auto p = reinterpret_cast<const uint8_t *>(iccData.constData()) + dataOff + 8; // skip type+sig
+      qDebug() << "[ICC tag rXYZ] off:" << dataOff << "raw data bytes:"
+               << Qt::hex << p[0] << p[1] << p[2] << p[3]
+                        << p[4] << p[5] << p[6] << p[7]
+                        << p[8] << p[9] << p[10] << p[11];
+      rXYZ[0] = s15f16(p); rXYZ[1] = s15f16(p + 4); rXYZ[2] = s15f16(p + 8);
+      qDebug() << "  -> rXYZ:" << rXYZ[0] << rXYZ[1] << rXYZ[2];
+      foundR = true;
+    }
+    else if (sig == tagG && dataOff + 20 <= uint32_t(iccData.size()))
+    {
+      auto p = reinterpret_cast<const uint8_t *>(iccData.constData()) + dataOff + 8;
+      gXYZ[0] = s15f16(p); gXYZ[1] = s15f16(p + 4); gXYZ[2] = s15f16(p + 8);
+      foundG = true;
+    }
+    else if (sig == tagB && dataOff + 20 <= uint32_t(iccData.size()))
+    {
+      auto p = reinterpret_cast<const uint8_t *>(iccData.constData()) + dataOff + 8;
+      bXYZ[0] = s15f16(p); bXYZ[1] = s15f16(p + 4); bXYZ[2] = s15f16(p + 8);
+      foundB = true;
+    }
+    else if (sig == tagW && dataOff + 20 <= uint32_t(iccData.size()))
+    {
+      auto p = reinterpret_cast<const uint8_t *>(iccData.constData()) + dataOff + 8;
+      wXYZ[0] = s15f16(p); wXYZ[1] = s15f16(p + 4); wXYZ[2] = s15f16(p + 8);
+      foundW = true;
+    }
+  }
+
+  return foundR && foundG && foundB && foundW;
+}
+
+/// Build 3×3 gamut conversion matrix from ICC primaries.
+/// Computes: source RGB → XYZ → display RGB.
+/// All primaries are D50-referenced XYZ (from ICC tags).
+/// @param matrixOut row-major 3×3 output [source RGB → display RGB]
+static void buildMatrixFromIcc(ColorGamut source,
+                               const float rXYZ[3], const float gXYZ[3],
+                               const float bXYZ[3],
+                               float matrixOut[9])
+{
+  // ── Source primaries in D50 XYZ ────────────────────────────────
+  static const float sRGB_r[3] = {0.4360f, 0.2225f, 0.0139f};
+  static const float sRGB_g[3] = {0.3851f, 0.7169f, 0.0971f};
+  static const float sRGB_b[3] = {0.1431f, 0.0606f, 0.7141f};
+
+  static const float P3_r[3] = {0.5151f, 0.2412f, -0.0011f};
+  static const float P3_g[3] = {0.2920f, 0.6923f, 0.0419f};
+  static const float P3_b[3] = {0.1571f, 0.0666f, 0.7841f};
+
+  static const float B2020_r[3] = {0.6735f, 0.2790f, 0.0020f};
+  static const float B2020_g[3] = {0.1658f, 0.6754f, 0.0300f};
+  static const float B2020_b[3] = {0.1250f, 0.0456f, 0.7969f};
+
+  const float *sr, *sg, *sb;
+  switch (source)
+  {
+    case ColorGamut::P3:     sr=P3_r; sg=P3_g; sb=P3_b; break;
+    case ColorGamut::BT2020: sr=B2020_r; sg=B2020_g; sb=B2020_b; break;
+    default:                 sr=sRGB_r; sg=sRGB_g; sb=sRGB_b; break;
+  }
+
+  // ── Helper: invert 3×3 matrix ─────────────────────────────────
+  auto inv3 = [](const float A[9], float inv[9]) -> bool {
+    float det = A[0]*(A[4]*A[8]-A[5]*A[7])
+              - A[1]*(A[3]*A[8]-A[5]*A[6])
+              + A[2]*(A[3]*A[7]-A[4]*A[6]);
+    if (std::abs(det) < 1e-10f) return false;
+    float id = 1.0f / det;
+    inv[0] =  (A[4]*A[8]-A[5]*A[7]) * id;
+    inv[1] = -(A[1]*A[8]-A[2]*A[7]) * id;
+    inv[2] =  (A[1]*A[5]-A[2]*A[4]) * id;
+    inv[3] = -(A[3]*A[8]-A[5]*A[6]) * id;
+    inv[4] =  (A[0]*A[8]-A[2]*A[6]) * id;
+    inv[5] = -(A[0]*A[5]-A[2]*A[3]) * id;
+    inv[6] =  (A[3]*A[7]-A[4]*A[6]) * id;
+    inv[7] = -(A[0]*A[7]-A[1]*A[6]) * id;
+    inv[8] =  (A[0]*A[4]-A[1]*A[3]) * id;
+    return true;
+  };
+
+  // ── Helper: multiply 3×3 matrices C = A × B ───────────────────
+  auto mul3 = [](const float A[9], const float B[9], float C[9]) {
+    for (int row = 0; row < 3; ++row)
+      for (int col = 0; col < 3; ++col)
+        C[row*3+col] = A[row*3+0]*B[0*3+col]
+                     + A[row*3+1]*B[1*3+col]
+                     + A[row*3+2]*B[2*3+col];
+  };
+
+  // ── Step 1: source RGB → XYZ (D50), columns = source primaries ─
+  float src2XYZ[9] = {
+    sr[0], sg[0], sb[0],
+    sr[1], sg[1], sb[1],
+    sr[2], sg[2], sb[2]
+  };
+
+  // ── Step 2: display RGB → XYZ (D50), columns = ICC primaries ───
+  float dst2XYZ[9] = {
+    rXYZ[0], gXYZ[0], bXYZ[0],
+    rXYZ[1], gXYZ[1], bXYZ[1],
+    rXYZ[2], gXYZ[2], bXYZ[2]
+  };
+
+  // ── Step 3: invert display RGB→XYZ to get XYZ→display RGB ─────
+  float XYZ2dst[9];
+  if (!inv3(dst2XYZ, XYZ2dst))
+  {
+    auto m = getGamutMatrix(source, ColorGamut::BT709);
+    std::copy(m, m + 9, matrixOut);
+    return;
+  }
+
+  // ── Step 4: source RGB → XYZ → display RGB ─────────────────────
+  mul3(XYZ2dst, src2XYZ, matrixOut);
+}
+
 /// Get gamut matrix for a display QColorSpace (handles Custom primaries).
 /// Uses precomputed matrices for standard primaries, computes from color
 /// transform for Custom primaries.
@@ -149,25 +324,27 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
     return getGamutMatrix(source, ColorGamut::BT709);
 
   auto primaries = display.primaries();
+  auto desc = display.description();
 
-  // Standard primaries — use precomputed matrix
+  // ── Tier 1: primaries enum ──────────────────────────────────
   switch (primaries)
   {
     case QColorSpace::Primaries::SRgb:
       return getGamutMatrix(source, ColorGamut::BT709);
     case QColorSpace::Primaries::DciP3D65:
       return getGamutMatrix(source, ColorGamut::P3);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    case QColorSpace::Primaries::Bt2020:
+      return getGamutMatrix(source, ColorGamut::BT2020);
+#endif
     default:
       break;
   }
 
-  // Custom primaries — compute matrix from Qt color transform.
-  // Both source and target must use Linear transfer function so the
-  // transform only handles primaries/chromatic adaptation, not encoding.
+  // ── Tier 2: compute matrix from QColorTransform ──────────────
   QColorSpace srcCS = makeLinearColorSpace(source);
 
-  // Target: if display has standard primaries use the enum, otherwise
-  // keep its (possibly ICC-derived) custom primaries with Linear transfer.
+  // Target: use display primaries with Linear transfer function
   QColorSpace dstCS;
   if (primaries == QColorSpace::Primaries::Custom)
   {
@@ -200,6 +377,40 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
   matrixOut[0] = float(r.redF());   matrixOut[3] = float(r.greenF()); matrixOut[6] = float(r.blueF());  // column 0
   matrixOut[1] = float(g.redF());   matrixOut[4] = float(g.greenF()); matrixOut[7] = float(g.blueF());  // column 1
   matrixOut[2] = float(b.redF());   matrixOut[5] = float(b.greenF()); matrixOut[8] = float(b.blueF());  // column 2
+
+  // ── Tier 4: parse ICC binary to compute gamut matrix ──────────
+  const auto &iccData = functionsGui::getCachedIccData();
+  const char *match = "(computed from QColorTransform)";
+  if (!iccData.isEmpty())
+  {
+    float ir[3], ig[3], ib[3], iw[3];
+    if (parseIccPrimaries(iccData, ir, ig, ib, iw))
+    {
+      buildMatrixFromIcc(source, ir, ig, ib, matrixOut);
+      match = "ICC (rXYZ/gXYZ/bXYZ computed)";
+    }
+  }
+
+  static bool logged = false;
+  if (!logged)
+  {
+    logged = true;
+    qDebug() << "[getGamutMatrixForDisplay]"
+             << "\n  display:" << desc
+             << "\n  primaries:" << static_cast<int>(primaries)
+             << "transfer:" << static_cast<int>(display.transferFunction())
+             << "gamma:" << display.gamma()
+             << "\n  source:" << static_cast<int>(source)
+             << "matrix match:" << match
+             << "\n  basis vectors (source→display):"
+             << "\n    r:" << r.redF() << r.greenF() << r.blueF()
+             << "\n    g:" << g.redF() << g.greenF() << g.blueF()
+             << "\n    b:" << b.redF() << b.greenF() << b.blueF()
+             << "\n  matrix (row-major):"
+             << "\n    [" << matrixOut[0] << matrixOut[1] << matrixOut[2] << "]"
+             << "\n    [" << matrixOut[3] << matrixOut[4] << matrixOut[5] << "]"
+             << "\n    [" << matrixOut[6] << matrixOut[7] << matrixOut[8] << "]";
+  }
 
   return matrixOut;
 }

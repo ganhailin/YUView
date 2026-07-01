@@ -58,6 +58,10 @@ Color  toColor(const QColor &color);
 // cannot be determined or on non-macOS platforms.
 QColorSpace getDisplayColorSpace();
 
+/// Returns the raw ICC profile bytes from the last successful getDisplayColorSpace() call.
+/// Empty if ICC was not read (macOS or fallback). Used for Custom primaries parsing.
+const QByteArray &getCachedIccData();
+
 // An image format used internally by QPixmap. On a raster paint backend, the pixmap
 // is backed by an image, and this returns the format of the internal QImage buffer.
 // This will always return the same result as the platformImageFormat when the default
