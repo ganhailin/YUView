@@ -62,6 +62,14 @@ QColorSpace getDisplayColorSpace();
 /// Empty if ICC was not read (macOS or fallback). Used for Custom primaries parsing.
 const QByteArray &getCachedIccData();
 
+/// Check if Windows Auto Color Management (ACM) is enabled.
+/// ACM is a Windows 11 feature that lets the OS compositor handle
+/// gamut mapping. When ACM is on, the app should output sRGB and
+/// let the system map to the display gamut — no in-shader gamut
+/// conversion is needed.
+/// Returns false on non-Windows platforms.
+bool isWindowsACMEnabled();
+
 // An image format used internally by QPixmap. On a raster paint backend, the pixmap
 // is backed by an image, and this returns the format of the internal QImage buffer.
 // This will always return the same result as the platformImageFormat when the default

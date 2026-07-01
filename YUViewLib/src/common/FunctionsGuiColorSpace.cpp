@@ -25,10 +25,12 @@
 #ifndef Q_OS_MAC
 
 #ifdef Q_OS_WIN
+#include <memory>
 #include <QLibrary>
 #include <QDebug>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winuser.h>
 #endif
 
 namespace functionsGui {
@@ -113,6 +115,63 @@ const QByteArray &getCachedIccData()
 {
   return s_cachedIccData;
 }
+
+#ifdef Q_OS_WIN
+bool isWindowsACMEnabled()
+{
+  // Windows 11 Auto Color Management: query the compositor's Advanced Color
+  // state via DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO (type 9).
+  // AdvancedColorEnabled (bit 1) indicates the display is in Advanced Color
+  // mode — either HDR or ACM SDR. ACM is active when AdvancedColor is on
+  // but HDR is NOT active.
+  // Same detection logic as DXGISwapChain::detectHDRCapabilities().
+
+  static const DWORD QDC_ACTIVE = 0x00000001; // QDC_ONLY_ACTIVE_PATH
+
+  UINT32 pathCount = 0, modeCount = 0;
+  if (GetDisplayConfigBufferSizes(QDC_ACTIVE, &pathCount, &modeCount) != ERROR_SUCCESS)
+    return false;
+
+  auto paths = std::make_unique<DISPLAYCONFIG_PATH_INFO[]>(pathCount);
+  auto modes = std::make_unique<DISPLAYCONFIG_MODE_INFO[]>(modeCount);
+  if (QueryDisplayConfig(QDC_ACTIVE, &pathCount, paths.get(),
+                         &modeCount, modes.get(), nullptr) != ERROR_SUCCESS)
+    return false;
+
+  // Query AdvancedColorInfo on the first active path
+  struct {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    UINT32 value;
+    UINT32 colorEncoding;
+    UINT32 bitsPerColorChannel;
+  } acInfo = {};
+  acInfo.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(9); // GET_ADVANCED_COLOR_INFO
+  acInfo.header.size = sizeof(acInfo);
+  acInfo.header.adapterId = paths[0].targetInfo.adapterId;
+  acInfo.header.id = paths[0].targetInfo.id;
+
+  if (DisplayConfigGetDeviceInfo(&acInfo.header) != ERROR_SUCCESS)
+    return false;
+
+  bool advancedColorEnabled = (acInfo.value & 0x2) != 0; // bit 1: AdvancedColorEnabled
+
+  static bool logged = false;
+  if (!logged)
+  {
+    logged = true;
+    qDebug() << "[isWindowsACMEnabled] AdvancedColorEnabled:" << advancedColorEnabled
+             << "raw value:" << acInfo.value
+             << "colorEncoding:" << acInfo.colorEncoding
+             << "bpc:" << acInfo.bitsPerColorChannel;
+  }
+
+  // ACM is active when AdvancedColor is on but HDR is NOT active
+  // (we can't check HDR without D3D, so the caller ORs this with HDR state)
+  return advancedColorEnabled;
+}
+#else
+bool isWindowsACMEnabled() { return false; }
+#endif
 
 } // namespace functionsGui
 
