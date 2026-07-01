@@ -192,10 +192,14 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
   auto g = mapFloat(0.0f, 1.0f, 0.0f);
   auto b = mapFloat(0.0f, 0.0f, 1.0f);
 
-  // Row-major 3×3: each basis vector is a column
-  matrixOut[0] = float(r.redF());   matrixOut[1] = float(g.redF());   matrixOut[2] = float(b.redF());
-  matrixOut[3] = float(r.greenF()); matrixOut[4] = float(g.greenF()); matrixOut[5] = float(b.greenF());
-  matrixOut[6] = float(r.blueF());  matrixOut[7] = float(g.blueF());  matrixOut[8] = float(b.blueF());
+  // Row-major 3×3: basis-vector images form the columns of M.
+  // r = M·e0 → column 0, g = M·e1 → column 1, b = M·e2 → column 2.
+  // Fill column-wise so matrixOut matches the row-major M used by the
+  // precomputed matrices (e.g. BT709_TO_P3) and the downstream
+  // row-major→column-major layout conversion in HDR10Widget.
+  matrixOut[0] = float(r.redF());   matrixOut[3] = float(r.greenF()); matrixOut[6] = float(r.blueF());  // column 0
+  matrixOut[1] = float(g.redF());   matrixOut[4] = float(g.greenF()); matrixOut[7] = float(g.blueF());  // column 1
+  matrixOut[2] = float(b.redF());   matrixOut[5] = float(b.greenF()); matrixOut[8] = float(b.blueF());  // column 2
 
   return matrixOut;
 }
