@@ -465,7 +465,6 @@ void HDR10Widget::paintGL()
   // Set color processing uniforms (EOTF, gamut, brightness)
   // These are used by both standard and dither shaders for SDR output
   glUniform1i(currentProgram->uniformLocation("eotfType"), static_cast<int>(m_eotf));
-  glUniform1i(currentProgram->uniformLocation("sourceGamut"), static_cast<int>(m_colorGamut));
   glUniform1f(currentProgram->uniformLocation("gammaValue"), m_gammaValue);
   glUniform1f(currentProgram->uniformLocation("diffuseWhiteNits"), m_diffuseWhiteNits);
   glUniform1f(currentProgram->uniformLocation("hdrBrightness"), m_hdrBrightness);
@@ -475,19 +474,28 @@ void HDR10Widget::paintGL()
   // On macOS with Display P3 screens, this converts BT.709→Display P3.
   // The shader does sRGB OETF after gamut conversion, outputting sRGB-encoded
   // values in the display's gamut. This matches QPainter and EDR paths.
-  auto displayCS = functionsGui::getDisplayColorSpace();
-
-  // Select target gamut matrix — uses precomputed matrices for standard
-  // primaries, computes from ICC profile for Custom primaries.
+  //
+  // When the surface is already sRGB, skip the display color space query and
+  // use BT.709 as the gamut target directly — no conversion is needed.
+  const bool surfaceIsSRGB =
+      (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
   float customMatrix[9];
   const float *matrixData;
-  if (displayCS.isValid())
+  if (surfaceIsSRGB)
   {
-    matrixData = color::getGamutMatrixForDisplay(m_colorGamut, displayCS, customMatrix);
+    matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
   }
   else
   {
-    matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+    auto displayCS = functionsGui::getDisplayColorSpace();
+    if (displayCS.isValid())
+    {
+      matrixData = color::getGamutMatrixForDisplay(m_colorGamut, displayCS, customMatrix);
+    }
+    else
+    {
+      matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+    }
   }
   QMatrix3x3 gamutMat;
   for (int row = 0; row < 3; ++row)

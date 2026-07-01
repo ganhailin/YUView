@@ -233,7 +233,7 @@ bool shouldApplySRGBOETF(const DisplayInfo &info)
 QString generateGLSLColorProcessing()
 {
   // GLSL 330 core — used by HDR10Widget (OpenGL)
-  // Expects uniforms: eotfType (int), sourceGamut (int), gammaValue (float),
+  // Expects uniforms: eotfType (int), gammaValue (float),
   //   diffuseWhiteNits (float), hdrBrightness (float), gamutMatrix (mat3),
   //   systemHandlesTonemapping (float), applySRGBOETF (float)
   return QStringLiteral(R"GLSL(
@@ -322,9 +322,9 @@ vec3 processColor(vec3 color)
     }
 
     // ── Gamut Conversion ──
-    if (sourceGamut != 2) {
-        linear = gamutMatrix * linear;
-    }
+    // The matrix is always valid (identity for same→same), so apply
+    // unconditionally — no need for a sourceGamut shortcut.
+    linear = gamutMatrix * linear;
 
     // ── HDR Brightness Adjustment ──
     linear *= hdrBrightness;
@@ -520,7 +520,7 @@ float3 srgbEotf(float3 srgb) {
 // Input: color in 0-1 range
 // Output: linear light for EDR output (values >1.0 trigger EDR)
 // No tonemapping — macOS compositor handles it.
-float3 processColor(float3 color, int eotfType, int sourceGamut,
+float3 processColor(float3 color, int eotfType,
                     float gammaValue, float diffuseWhiteNits,
                     float3x3 gamutMatrix, float hdrBrightness)
 {
@@ -537,9 +537,9 @@ float3 processColor(float3 color, int eotfType, int sourceGamut,
     }
 
     // ── Gamut Conversion (source → Display P3) ──
-    if (sourceGamut != 2) {
-        linear = gamutMatrix * linear;
-    }
+    // The matrix is always valid (identity for same→same), so apply
+    // unconditionally — no need for a sourceGamut shortcut.
+    linear = gamutMatrix * linear;
 
     // ── HDR Brightness Adjustment ──
     linear *= hdrBrightness;

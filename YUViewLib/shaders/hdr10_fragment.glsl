@@ -19,7 +19,6 @@ uniform usampler2D texture16bit;
 
 // Uniforms for color processing
 uniform int   eotfType;                    // 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
-uniform int   sourceGamut;                 // 0=BT2020, 1=BT709, 2=P3
 uniform float gammaValue;                  // Gamma value (when eotfType == 2)
 uniform float diffuseWhiteNits;            // Diffuse white brightness in nits (default: 203)
 uniform float hdrBrightness;               // HDR brightness multiplier (default: 1.0)
@@ -109,9 +108,7 @@ vec3 processColor(vec3 color)
     }
 
     // Gamut Conversion
-    if (sourceGamut != 2) {
-        linear = gamutMatrix * linear;
-    }
+    linear = gamutMatrix * linear;
 
     // HDR Brightness Adjustment
     linear *= hdrBrightness;

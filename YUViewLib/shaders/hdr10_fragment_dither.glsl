@@ -11,7 +11,6 @@ out vec4 fragColor;
 uniform usampler2D texture16bit;
 
 uniform int   eotfType;
-uniform int   sourceGamut;
 uniform float gammaValue;
 uniform float diffuseWhiteNits;
 uniform float hdrBrightness;
@@ -120,9 +119,7 @@ void main()
     }
 
     // Gamut Conversion
-    if (sourceGamut != 2) {
-        linear = gamutMatrix * linear;
-    }
+    linear = gamutMatrix * linear;
 
     // HDR Brightness
     linear *= hdrBrightness;

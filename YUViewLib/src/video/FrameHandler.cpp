@@ -468,15 +468,21 @@ void FrameHandler::drawFrame(QPainter *painter, double zoomFactor, bool drawRawV
   // Color management: tag the image as sRGB, then convert to the display's
   // color space (Display P3 on most Macs). This matches the EDR Metal path
   // which converts BT.709 → Display P3 in the shader.
+  //
+  // When the surface is already sRGB and the display is also sRGB, the
+  // QImage's sRGB-encoded values are drawn directly — no conversion needed.
   QImage imgToDraw = currentImage;
 
-  if (!imgToDraw.colorSpace().isValid())
-    imgToDraw.setColorSpace(QColorSpace::SRgb);
-  QColorSpace displayCS = QColorSpace::SRgb;
-  if (QSurfaceFormat::defaultFormat().colorSpace() != QColorSpace::SRgb)
-    displayCS = functionsGui::getDisplayColorSpace();
-  if (displayCS.isValid() && displayCS != QColorSpace::SRgb)
-    imgToDraw = imgToDraw.convertedToColorSpace(displayCS);
+  const bool surfaceIsSRGB =
+      (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
+  if (!surfaceIsSRGB)
+  {
+    if (!imgToDraw.colorSpace().isValid())
+      imgToDraw.setColorSpace(QColorSpace::SRgb);
+    QColorSpace displayCS = functionsGui::getDisplayColorSpace();
+    if (displayCS.isValid() && displayCS != QColorSpace::SRgb)
+      imgToDraw = imgToDraw.convertedToColorSpace(displayCS);
+  }
 
 
   // Premultiplied alpha handling.

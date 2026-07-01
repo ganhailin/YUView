@@ -50,7 +50,6 @@ struct VideoVertex
 struct VideoUniforms
 {
   int   eotfType;           // 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
-  int   sourceGamut;        // 0=BT2020, 1=BT709, 2=P3
   float gammaValue;         // Gamma 值
   float diffuseWhiteNits;   // 漫射白亮度 (nits)
   float gamutMatrix[9];     // 3x3 色域转换矩阵 (行优先)
@@ -408,7 +407,6 @@ void MacEDRRenderer::render()
   // 设置 VideoUniforms
   VideoUniforms uniforms;
   uniforms.eotfType = static_cast<int>(m_eotf);
-  uniforms.sourceGamut = static_cast<int>(m_colorGamut);
   uniforms.gammaValue = m_gammaValue;
   uniforms.diffuseWhiteNits = m_diffuseWhiteNits;
   uniforms.premultipliedAlpha = m_premultipliedAlpha ? 1 : 0;
@@ -543,7 +541,6 @@ bool MacEDRRenderer::createRenderPipeline()
       @"\n"
       @"struct VideoUniforms {\n"
       @"    int eotfType;\n"
-      @"    int sourceGamut;\n"
       @"    float gammaValue;\n"
       @"    float diffuseWhiteNits;\n"
       @"    float gamutMatrix[9];\n"
@@ -674,9 +671,7 @@ bool MacEDRRenderer::createRenderPipeline()
       @"    float3 col2 = float3(uniforms.gamutMatrix[2], uniforms.gamutMatrix[5], uniforms.gamutMatrix[8]);\n"
       @"    float3x3 gamutMatrix = float3x3(col0, col1, col2);\n"
       @"\n"
-      @"    if (uniforms.sourceGamut != 2) {\n"
-      @"        linear = gamutMatrix * linear;\n"
-      @"    }\n"
+      @"    linear = gamutMatrix * linear;\n"
       @"\n"
       @"    // ========== HDR 亮度调整 ==========\n"
       @"    // SDR 范围: 0.0-1.0 (100 nits)\n"
