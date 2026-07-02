@@ -124,8 +124,9 @@ public:
   enum class HDRRenderingMode
   {
     Disabled,     // Use standard QPainter rendering (8-bit)
-    Enabled,      // Use HDR10Widget for OpenGL rendering (10-bit capable)
-    DXGI          // Use HDR10WidgetWinDXGI for native Windows HDR (DXGI/D3D11)
+    GL,      // Use HDR10Widget for OpenGL rendering (10-bit capable)
+    DXGI,         // Use HDR10WidgetWinDXGI for native Windows HDR (DXGI/D3D11)
+    EDR           // Use HDR10WidgetMacEDR for macOS Metal EDR rendering
   };
 
   // Get and set the HDR rendering mode

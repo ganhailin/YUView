@@ -24,6 +24,7 @@
 #include <QGridLayout>
 #include <QLabel>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 
 #include <ui/views/SplitViewWidget.h>
@@ -43,22 +44,41 @@ HDRSettingsDock::HDRSettingsDock(QWidget *parent)
   labelHDRSection->setFont(boldFont);
   mainLayout->addWidget(labelHDRSection);
 
-  m_checkHDR = new QCheckBox("Enable HDR 10-bit Rendering");
-  m_checkHDR->setToolTip("Enable HDR rendering. On Windows, uses DXGI native HDR when available.");
-  mainLayout->addWidget(m_checkHDR);
-
+  // Rendering backend selection (combobox — no dependency between options)
+  auto *labelRenderer = new QLabel("Renderer:");
+  labelRenderer->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  m_comboRenderingMode = new QComboBox();
+  m_comboRenderingMode->addItem("Disabled (QPainter)");       // index 0 (always)
+  m_comboRenderingMode->addItem("OpenGL (HDR10Widget)");      // index 1 (always)
 #ifdef Q_OS_WIN
-  m_checkDXGI = new QCheckBox("DXGI (Native HDR)");
-  m_checkDXGI->setToolTip("Use DXGI/D3D11 native HDR rendering. When disabled, falls back to OpenGL.");
-  mainLayout->addWidget(m_checkDXGI);
+  m_comboRenderingMode->addItem("DXGI (Native HDR)");         // index 2 (Windows)
+#endif
+#ifdef Q_OS_MAC
+  m_comboRenderingMode->addItem("EDR (Metal Renderer)");      // index 2 (macOS)
 #endif
 
-#ifdef Q_OS_MAC
-  m_checkEDR = new QCheckBox("EDR (Metal Renderer)");
-  m_checkEDR->setToolTip("Use macOS Metal renderer for EDR display. When enabled, uses CAMetalLayer "
-                         "with Extended Linear Display P3 color space for reliable HDR output.");
-  mainLayout->addWidget(m_checkEDR);
-#endif
+  // Disable the OpenGL option if OpenGL 3.3 Core is not supported.
+  // The combobox index stays stable (OpenGL is always index 1) so saved
+  // settings remain valid — the user just can't select it.
+  {
+    QSettings settings;
+    bool gl33Supported = settings.value("System/GL33Supported", true).toBool();
+    if (!gl33Supported)
+    {
+      auto *model = qobject_cast<QStandardItemModel *>(m_comboRenderingMode->model());
+      if (model)
+      {
+        auto *item = model->item(1); // OpenGL
+        if (item)
+          item->setEnabled(false);
+      }
+      m_comboRenderingMode->setItemText(1, "OpenGL (HDR10Widget) — not supported");
+    }
+  }
+
+  m_comboRenderingMode->setToolTip("Select HDR rendering backend.");
+  mainLayout->addWidget(labelRenderer);
+  mainLayout->addWidget(m_comboRenderingMode);
 
   m_checkDithering = new QCheckBox("Dithering");
   m_checkDithering->setToolTip("Enable Bayer dithering for HDR rendering to reduce banding on SDR displays.");
@@ -163,13 +183,8 @@ HDRSettingsDock::HDRSettingsDock(QWidget *parent)
           this, &HDRSettingsDock::onAnySettingChanged);
   connect(m_spinBrightness, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &HDRSettingsDock::onAnySettingChanged);
-  connect(m_checkHDR, &QCheckBox::toggled, this, &HDRSettingsDock::onHDRToggled);
-#ifdef Q_OS_WIN
-  connect(m_checkDXGI, &QCheckBox::toggled, this, &HDRSettingsDock::onDXGIToggled);
-#endif
-#ifdef Q_OS_MAC
-  connect(m_checkEDR, &QCheckBox::toggled, this, &HDRSettingsDock::onEDRToggled);
-#endif
+  connect(m_comboRenderingMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &HDRSettingsDock::onRenderingModeChanged);
   connect(m_checkDithering, &QCheckBox::toggled, this, &HDRSettingsDock::onAnySettingChanged);
 
   onEOTFChanged(m_comboEOTF->currentIndex());
@@ -190,16 +205,40 @@ void HDRSettingsDock::loadSettings()
   m_spinGamma->setValue(settings.value("View/EDR_Gamma", 2.2).toDouble());
   m_spinDiffuseWhite->setValue(settings.value("View/EDR_DiffuseWhite", 203.0).toDouble());
   m_spinBrightness->setValue(settings.value("View/EDR_Brightness", 1.0).toDouble());
-  m_checkHDR->setChecked(settings.value("View/HDRRendering", false).toBool());
   m_checkDithering->setChecked(settings.value("View/HDRDithering", false).toBool());
+
+  // Map saved settings to combobox index.
+  // Legacy settings used separate bools: View/HDRRendering + View/UseDXGIMode + View/EDRMode.
+  // New setting: View/HDRRenderer (int combobox index).
+  int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
+  if (rendererIdx < 0)
+  {
+    // Migrate from legacy settings
+    bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+    if (!hdrEnabled)
+      rendererIdx = 0; // Disabled
 #ifdef Q_OS_WIN
-  m_checkDXGI->setChecked(settings.value("View/UseDXGIMode", true).toBool());
-  m_checkDXGI->setEnabled(m_checkHDR->isChecked());
+    else if (settings.value("View/UseDXGIMode", true).toBool())
+      rendererIdx = 2; // DXGI
+    else
+      rendererIdx = 1; // OpenGL
+#elif defined(Q_OS_MAC)
+    else if (settings.value("View/EDRMode", true).toBool())
+      rendererIdx = 2; // EDR
+    else
+      rendererIdx = 1; // OpenGL
+#else
+    else
+      rendererIdx = 1; // OpenGL
 #endif
-#ifdef Q_OS_MAC
-  m_checkEDR->setChecked(settings.value("View/EDRMode", true).toBool());
-  m_checkEDR->setEnabled(m_checkHDR->isChecked());
-#endif
+  }
+
+  // If the saved renderer is OpenGL(1) but OpenGL 3.3 is not supported,
+  // fall back to Disabled.
+  if (rendererIdx == 1 && !settings.value("System/GL33Supported", true).toBool())
+    rendererIdx = 0;
+
+  m_comboRenderingMode->setCurrentIndex(rendererIdx);
   updateDitheringState();
 }
 
@@ -214,14 +253,8 @@ void HDRSettingsDock::applySettings()
   settings.setValue("View/EDR_Gamma", m_spinGamma->value());
   settings.setValue("View/EDR_DiffuseWhite", m_spinDiffuseWhite->value());
   settings.setValue("View/EDR_Brightness", m_spinBrightness->value());
-  settings.setValue("View/HDRRendering", m_checkHDR->isChecked());
+  settings.setValue("View/HDRRenderer", m_comboRenderingMode->currentIndex());
   settings.setValue("View/HDRDithering", m_checkDithering->isChecked());
-#ifdef Q_OS_WIN
-  settings.setValue("View/UseDXGIMode", m_checkDXGI->isChecked());
-#endif
-#ifdef Q_OS_MAC
-  settings.setValue("View/EDRMode", m_checkEDR->isChecked());
-#endif
 
   // Trigger SplitViewWidget to reload all settings (HDR mode + color params)
   m_splitView->updateSettings();
@@ -234,25 +267,7 @@ void HDRSettingsDock::onEOTFChanged(int index)
   m_labelGamma->setEnabled(gammaEnabled);
 }
 
-void HDRSettingsDock::onHDRToggled(bool checked)
-{
-#ifdef Q_OS_WIN
-  m_checkDXGI->setEnabled(checked);
-#endif
-#ifdef Q_OS_MAC
-  m_checkEDR->setEnabled(checked);
-#endif
-  updateDitheringState();
-  applySettings();
-}
-
-void HDRSettingsDock::onDXGIToggled(bool)
-{
-  updateDitheringState();
-  applySettings();
-}
-
-void HDRSettingsDock::onEDRToggled(bool)
+void HDRSettingsDock::onRenderingModeChanged(int)
 {
   updateDitheringState();
   applySettings();
@@ -316,19 +331,11 @@ bool HDRSettingsDock::ditheringEnabled() const
 
 void HDRSettingsDock::updateDitheringState()
 {
-  bool hdrOn = m_checkHDR->isChecked();
-  bool dxgiOn = false;
-#ifdef Q_OS_WIN
-  dxgiOn = m_checkDXGI && m_checkDXGI->isChecked();
-#endif
-  bool edrOn = false;
-#ifdef Q_OS_MAC
-  edrOn = m_checkEDR && m_checkEDR->isChecked();
-#endif
-  // Dithering is only available when HDR is enabled and DXGI/EDR mode is off
-  // (DXGI uses FP16 scRGB which doesn't need dithering; EDR uses Metal's native HDR)
-  bool ditheringAvailable = hdrOn && !dxgiOn && !edrOn;
-  m_checkDithering->setEnabled(ditheringAvailable);
-  if (!ditheringAvailable)
+  // Dithering is only useful for the OpenGL path (8-bit FBO on macOS).
+  // DXGI uses FP16 scRGB (no banding), EDR uses Metal's native HDR.
+  // ComboBox index 1 = OpenGL.
+  bool isOpenGL = (m_comboRenderingMode->currentIndex() == 1);
+  m_checkDithering->setEnabled(isOpenGL);
+  if (!isOpenGL)
     m_checkDithering->setChecked(false);
 }

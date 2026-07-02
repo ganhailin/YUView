@@ -74,9 +74,7 @@ signals:
 
 private slots:
   void onEOTFChanged(int index);
-  void onHDRToggled(bool checked);
-  void onDXGIToggled(bool checked);
-  void onEDRToggled(bool checked);
+  void onRenderingModeChanged(int index);
   void onAnySettingChanged();
 
 private:
@@ -84,14 +82,12 @@ private:
   void loadSettings();
   void updateDitheringState();
 
+  QComboBox      *m_comboRenderingMode{};
   QComboBox      *m_comboEOTF{};
   QComboBox      *m_comboGamut{};
   QDoubleSpinBox *m_spinGamma{};
   QDoubleSpinBox *m_spinDiffuseWhite{};
   QDoubleSpinBox *m_spinBrightness{};
-  QCheckBox      *m_checkHDR{};
-  QCheckBox      *m_checkDXGI{};
-  QCheckBox      *m_checkEDR{};
   QCheckBox      *m_checkDithering{};
   QLabel         *m_labelHDRInfo{};
   QLabel         *m_labelGamma{};

@@ -158,21 +158,48 @@ void splitViewWidget::updateSettings()
   m_colorDiffuseWhite = settings.value("View/EDR_DiffuseWhite", 203.0f).toFloat();
   m_colorBrightness = settings.value("View/EDR_Brightness", 1.0f).toFloat();
 
-  // Load HDR rendering mode from settings
-  bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
-  if (hdrEnabled)
+  // Load HDR rendering mode from settings.
+  // View/HDRRenderer is a combobox index: 0=Disabled, 1=OpenGL,
+  // 2=DXGI (Windows) or EDR (macOS).
+  int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
+  if (rendererIdx < 0)
   {
+    // Migrate from legacy settings
+    bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+    if (!hdrEnabled)
+      rendererIdx = 0;
 #ifdef Q_OS_WIN
-    bool useDXGI = settings.value("View/UseDXGIMode", true).toBool();
-    setHDRRenderingMode(useDXGI ? HDRRenderingMode::DXGI : HDRRenderingMode::Enabled, false);
+    else if (settings.value("View/UseDXGIMode", true).toBool())
+      rendererIdx = 2;
+    else
+      rendererIdx = 1;
+#elif defined(Q_OS_MAC)
+    else if (settings.value("View/EDRMode", true).toBool())
+      rendererIdx = 2;
+    else
+      rendererIdx = 1;
 #else
-    setHDRRenderingMode(HDRRenderingMode::Enabled, false);
+    else
+      rendererIdx = 1;
 #endif
   }
-  else
+
+  // Guard: if OpenGL 3.3 is not supported, don't use the OpenGL path.
+  if (rendererIdx == 1 && !settings.value("System/GL33Supported", true).toBool())
+    rendererIdx = 0;
+
+  HDRRenderingMode mode = HDRRenderingMode::Disabled;
+  switch (rendererIdx)
   {
-    setHDRRenderingMode(HDRRenderingMode::Disabled, false);
+    case 1:  mode = HDRRenderingMode::GL; break;
+#ifdef Q_OS_WIN
+    case 2:  mode = HDRRenderingMode::DXGI; break;
+#elif defined(Q_OS_MAC)
+    case 2:  mode = HDRRenderingMode::EDR; break;
+#endif
+    default: mode = HDRRenderingMode::Disabled; break;
   }
+  setHDRRenderingMode(mode, false);
 
   // Always push color settings to active HDR widgets
   applyColorSettingsToWidgets();
@@ -207,28 +234,6 @@ void splitViewWidget::applyColorSettingsToWidgets()
     hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
     hdr10WidgetMacEDR->setPremultipliedAlpha(
         settings.value("View/PremultipliedAlpha", true).toBool());
-
-    // Toggle MacEDR widget visibility based on EDR mode setting.
-    // This must be done here (not just in setHDRRenderingMode) because
-    // setHDRRenderingMode has an early return when the mode hasn't changed,
-    // so toggling EDR alone wouldn't update widget visibility.
-    if (hdrRenderingMode != HDRRenderingMode::Disabled)
-    {
-      bool useMacEDR = settings.value("View/EDRMode", true).toBool();
-      if (useMacEDR)
-      {
-        hdr10WidgetMacEDR->show();
-        hdr10WidgetMacEDR->raise();
-        if (hdr10Widget)
-          hdr10Widget->hide();
-      }
-      else
-      {
-        hdr10WidgetMacEDR->hide();
-        if (hdr10Widget)
-          hdr10Widget->show();
-      }
-    }
   }
 #endif
 #ifdef Q_OS_WIN
@@ -253,13 +258,14 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
   hdrRenderingMode = mode;
 
   bool useDXGI = (mode == HDRRenderingMode::DXGI);
-  bool useOpenGL = (mode == HDRRenderingMode::Enabled);
-  bool useHDR = useDXGI || useOpenGL;
+  bool useOpenGL = (mode == HDRRenderingMode::GL);
+  bool useEDR = (mode == HDRRenderingMode::EDR);
+  bool useHDR = useDXGI || useOpenGL || useEDR;
 
   if (useHDR)
   {
 #ifdef Q_OS_MAC
-    // macOS: Create MacEDR widget (Metal-based) for reliable EDR support
+    // macOS: Create MacEDR widget (Metal-based) for EDR support
     if (!hdr10WidgetMacEDR)
     {
       hdr10WidgetMacEDR = std::make_unique<video::HDR10WidgetMacEDR>(this);
@@ -280,12 +286,14 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
           premulSettings.value("View/PremultipliedAlpha", true).toBool());
     }
 
-    QSettings edrSettings;
-    bool useMacEDR = edrSettings.value("View/EDRMode", true).toBool();
-    if (useMacEDR)
+    if (useEDR)
     {
       hdr10WidgetMacEDR->show();
       hdr10WidgetMacEDR->raise();
+    }
+    else
+    {
+      hdr10WidgetMacEDR->hide();
     }
 #endif
 
@@ -347,26 +355,11 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
               this, &splitViewWidget::hdrStatusChanged);
     }
 
-#ifdef Q_OS_MAC
-    if (useMacEDR && hdr10WidgetMacEDR)
-    {
-      hdr10Widget->hide();
-    }
-    else
-    {
+    // Show OpenGL widget only when it's the active backend
+    if (useOpenGL)
       hdr10Widget->show();
-      if (hdr10WidgetMacEDR)
-        hdr10WidgetMacEDR->hide();
-    }
-#elif defined(Q_OS_WIN)
-    // On Windows: show OpenGL only if not using DXGI
-    if (useDXGI)
-      hdr10Widget->hide();
     else
-      hdr10Widget->show();
-#else
-    hdr10Widget->show();
-#endif
+      hdr10Widget->hide();
   }
   else
   {
@@ -679,10 +672,7 @@ void splitViewWidget::paintEvent(QPaintEvent *)
       bool useHDRWidget = false;
 
 #ifdef Q_OS_MAC
-      QSettings edrSettings;
-      bool edrModePref = edrSettings.value("View/EDRMode", true).toBool();
-
-      if (hdrRenderingMode == HDRRenderingMode::Enabled && edrModePref && hdr10WidgetMacEDR && !waitingForCaching)
+      if (hdrRenderingMode == HDRRenderingMode::EDR && hdr10WidgetMacEDR && !waitingForCaching)
       {
         hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
         if (auto frameHandler = item[0]->getFrameHandler())
@@ -713,7 +703,7 @@ void splitViewWidget::paintEvent(QPaintEvent *)
       }
 #endif
 
-      if (!useHDRWidget && hdrRenderingMode == HDRRenderingMode::Enabled && hdr10Widget && !waitingForCaching)
+      if (!useHDRWidget && hdrRenderingMode == HDRRenderingMode::GL && hdr10Widget && !waitingForCaching)
       {
         hdr10Widget->setGeometry(0, 0, width(), height());
         if (auto frameHandler = item[0]->getFrameHandler())
@@ -1777,35 +1767,29 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
     return;
   }
 
-  // Show HDR widgets if HDR rendering is enabled (paintEvent will handle the rest)
-  if (hdrRenderingMode == HDRRenderingMode::Enabled)
-  {
+  // Show the active HDR widget (paintEvent will feed it frames).
+  // Visibility is driven solely by hdrRenderingMode — no legacy
+  // View/EDRMode or View/UseDXGIMode checks.
 #ifdef Q_OS_MAC
-    QSettings edrSettings;
-    bool useMacEDR = edrSettings.value("View/EDRMode", true).toBool();
-
-    if (useMacEDR && hdr10WidgetMacEDR)
-    {
-      hdr10WidgetMacEDR->show();
-      if (hdr10Widget)
-        hdr10Widget->hide();
-    }
-    else
-    {
-      if (hdr10Widget)
-        hdr10Widget->show();
-      if (hdr10WidgetMacEDR)
-        hdr10WidgetMacEDR->hide();
-    }
-#else
+  if (hdrRenderingMode == HDRRenderingMode::EDR && hdr10WidgetMacEDR)
+  {
+    hdr10WidgetMacEDR->show();
     if (hdr10Widget)
-      hdr10Widget->show();
+      hdr10Widget->hide();
+  }
+  else
 #endif
 #ifdef Q_OS_WIN
-  } else if (hdrRenderingMode == HDRRenderingMode::DXGI && hdr10WidgetWin) {
+  if (hdrRenderingMode == HDRRenderingMode::DXGI && hdr10WidgetWin)
+  {
     hdr10WidgetWin->show();
     hdr10WidgetWin->raise();
+  }
+  else
 #endif
+  if (hdrRenderingMode == HDRRenderingMode::GL && hdr10Widget)
+  {
+    hdr10Widget->show();
   }
 
   QSettings settings;
