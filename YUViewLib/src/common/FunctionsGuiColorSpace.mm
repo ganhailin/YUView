@@ -36,8 +36,14 @@
 
 namespace functionsGui {
 
+// Cache the ICC profile bytes from the last getDisplayColorSpace() call,
+// so ColorPipeline can parse primaries from it without re-querying the OS.
+static QByteArray s_cachedIccData;
+
 QColorSpace getDisplayColorSpace()
 {
+  s_cachedIccData.clear();
+
   auto *screen = QGuiApplication::primaryScreen();
   if (!screen)
     return QColorSpace::SRgb;
@@ -54,14 +60,21 @@ QColorSpace getDisplayColorSpace()
   NSData *iccData = [nsScreen.colorSpace ICCProfileData];
   if (iccData && iccData.length > 0)
   {
-    QByteArray iccBytes(reinterpret_cast<const char *>(iccData.bytes), int(iccData.length));
-    auto cs = QColorSpace::fromIccProfile(iccBytes);
+    s_cachedIccData = QByteArray(reinterpret_cast<const char *>(iccData.bytes), int(iccData.length));
+    auto cs = QColorSpace::fromIccProfile(s_cachedIccData);
     if (cs.isValid())
       return cs;
   }
 
   return QColorSpace::SRgb;
 }
+
+const QByteArray &getCachedIccData()
+{
+  return s_cachedIccData;
+}
+
+bool isWindowsACMEnabled() { return false; }
 
 } // namespace functionsGui
 
