@@ -101,23 +101,6 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
                                       const QColorSpace   &display,
                                       float               matrixOut[9]);
 
-// ── Shader generation ─────────────────────────────────────────────
-
-/// Generate the color-processing fragment shader body for GLSL (OpenGL).
-/// Returns the full EOTF + gamut + tonemapping + output mapping code
-/// as a string suitable for embedding in a #version 330 core shader.
-/// The caller provides the sampling code and main() entry point wrapper.
-QString generateGLSLColorProcessing();
-
-/// Generate the color-processing fragment shader body for HLSL (D3D11).
-/// Returns EOTF + gamut + tonemapping + output mapping as HLSL code.
-QString generateHLSLColorProcessing();
-
-/// Generate the color-processing fragment shader body for MSL (Metal).
-/// Returns EOTF + gamut + output mapping as Metal Shading Language code.
-/// Metal never does tonemapping (macOS compositor handles it).
-QString generateMSLColorProcessing();
-
 // ── Output space helpers ──────────────────────────────────────────
 
 /// Returns true if the backend should apply Reinhard tonemapping.
