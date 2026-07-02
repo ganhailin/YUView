@@ -37,6 +37,7 @@
 #include <ui/Mainwindow.h>
 
 #include <QApplication>
+#include <QOpenGLContext>
 #include <QSettings>
 #include <QSurfaceFormat>
 
@@ -67,6 +68,20 @@ YUViewApplication::YUViewApplication(int argc, char *argv[]) : QApplication(argc
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
     format.setColorSpace(QSurfaceFormat::sRGBColorSpace);
     QSurfaceFormat::setDefaultFormat(format);
+  }
+
+
+  // Check if the system supports OpenGL 3.3 Core Profile.
+  // Must run AFTER QApplication is created (Qt's GL platform plugin is
+  // not initialized until then) but before any HDR widgets are created.
+  {
+    QOpenGLContext ctx;
+    ctx.setFormat(QSurfaceFormat::defaultFormat());
+    bool gl33Supported = ctx.create() && ctx.format().version() >= qMakePair(3, 3);
+    QSettings settings;
+    settings.setValue("System/GL33Supported", gl33Supported);
+    if (!gl33Supported)
+      qWarning() << "OpenGL 3.3 Core Profile not supported — OpenGL HDR path disabled";
   }
 
   QStringList args = arguments();
