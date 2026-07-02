@@ -83,9 +83,13 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
 
 HDR10Widget::~HDR10Widget()
 {
-  // Clean up the GL texture while the context is still valid.
-  // shared_ptr members (m_program, m_programDither, m_pixelOverlay) are
-  // automatically released by their destructors — no manual cleanup needed.
+  // QOpenGLWidget's destructor will makeCurrent() and destroyFbos() internally.
+  // We must clean up our own GL resources (texture, VBO, VAO, shaders) BEFORE
+  // the base class destructor runs — otherwise the GL driver may crash in
+  // GLDTextureRec::dealloc when destroyFbos cascades into texture cleanup.
+  //
+  // makeCurrent() is safe here because the QOpenGLWidget context still exists
+  // at this point (the base class destructor hasn't run yet).
   auto *ctx = context();
   if (ctx && ctx->isValid())
   {
@@ -95,7 +99,13 @@ HDR10Widget::~HDR10Widget()
       glDeleteTextures(1, &m_textureId);
       m_textureId = 0;
     }
-    doneCurrent();
+    m_vbo.destroy();
+    m_vao.destroy();
+    m_program.reset();
+    m_programDither.reset();
+    // Do NOT call doneCurrent() — let QOpenGLWidget's destructor handle
+    // the context teardown. Calling doneCurrent() here can leave the
+    // context in an inconsistent state for the base class destroyFbos().
   }
   else
   {
