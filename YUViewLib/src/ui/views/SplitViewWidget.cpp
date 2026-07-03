@@ -293,7 +293,9 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
     }
     else
     {
+      // Release the Metal renderer when not in EDR mode.
       hdr10WidgetMacEDR->hide();
+      hdr10WidgetMacEDR.reset();
     }
 #endif
 
@@ -324,8 +326,9 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
     }
     else
     {
+      // Release the DXGI swap chain when not in DXGI mode.
       hdr10WidgetWin->hide();
-      hdr10WidgetWin->lower();
+      hdr10WidgetWin.reset();
     }
 #endif
 
@@ -359,26 +362,38 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
     if (useOpenGL)
       hdr10Widget->show();
     else
+    {
+      // Release OpenGL resources when not in GL mode.
       hdr10Widget->hide();
+      hdr10Widget.reset();
+    }
   }
   else
   {
 #ifdef Q_OS_MAC
     if (hdr10WidgetMacEDR)
+    {
       hdr10WidgetMacEDR->hide();
+      hdr10WidgetMacEDR.reset();
+    }
 #endif
 #ifdef Q_OS_WIN
     if (hdr10WidgetWin)
     {
+      // On Wine/CrossOver, hide() alone doesn't remove the native HWND
+      // (DXGI swap chain) from the screen. Destroy the widget entirely
+      // so the HWND and swap chain are released. It will be recreated
+      // if the user switches back to DXGI mode.
       hdr10WidgetWin->hide();
-      hdr10WidgetWin->lower();
+      hdr10WidgetWin.reset();
     }
 #endif
     if (hdr10Widget)
     {
       hdr10Widget->hide();
-      hdr10Widget->lower();
+      hdr10Widget.reset();
     }
+    raise();
   }
 
   if (callUpdate)
@@ -1767,9 +1782,8 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
     return;
   }
 
-  // Show the active HDR widget (paintEvent will feed it frames).
-  // Visibility is driven solely by hdrRenderingMode — no legacy
-  // View/EDRMode or View/UseDXGIMode checks.
+  // Show the active HDR widget, hide all others (paintEvent will feed it frames).
+  // Visibility is driven solely by hdrRenderingMode.
 #ifdef Q_OS_MAC
   if (hdrRenderingMode == HDRRenderingMode::EDR && hdr10WidgetMacEDR)
   {
@@ -1778,6 +1792,10 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
       hdr10Widget->hide();
   }
   else
+  {
+    if (hdr10WidgetMacEDR)
+      hdr10WidgetMacEDR->hide();
+  }
 #endif
 #ifdef Q_OS_WIN
   if (hdrRenderingMode == HDRRenderingMode::DXGI && hdr10WidgetWin)
@@ -1786,11 +1804,18 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
     hdr10WidgetWin->raise();
   }
   else
+  {
+    if (hdr10WidgetWin)
+    {
+      hdr10WidgetWin->hide();
+      hdr10WidgetWin->lower();
+    }
+  }
 #endif
   if (hdrRenderingMode == HDRRenderingMode::GL && hdr10Widget)
-  {
     hdr10Widget->show();
-  }
+  else if (hdr10Widget)
+    hdr10Widget->hide();
 
   QSettings settings;
   bool savePositionAndZoomPerItem = settings.value("SavePositionAndZoomPerItem", false).toBool();
