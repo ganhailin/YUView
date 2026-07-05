@@ -146,7 +146,7 @@
           <string>When enabled, texture data is treated as already premultiplied (RGB channels already multiplied by alpha). When disabled, the shader will premultiply RGB by alpha before blending. The Metal pipeline always uses premultiplied blending (required by macOS compositor). Default: enabled (matches macOS Qt QImage Format_ARGB32 behavior).</string>
          </property>
          <property name="text">
-          <string>Source texture is premultiplied alpha (EDR)</string>
+          <string>Source texture is premultiplied alpha</string>
          </property>
          <property name="checked">
           <bool>true</bool>
