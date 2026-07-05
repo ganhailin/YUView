@@ -36,35 +36,8 @@
 #include <common/Typedef.h>
 #include <ui/YUViewApplication.h>
 
-#ifdef Q_OS_WIN
-#include <windows.h>
-#include <iostream>
-
-// 动态创建控制台窗口 (Windows only)
-void CreateMyConsole() {
-    // 1. 分配一个控制台
-    AllocConsole();
-    
-    // 2. 设置控制台标题
-    SetConsoleTitle(L"YUView Debug Console");
-    
-    // 3. 重定向标准输出和标准错误到控制台
-    FILE* fp;
-    freopen_s(&fp, "CONOUT$", "w", stdout);
-    freopen_s(&fp, "CONOUT$", "w", stderr);
-    
-    // 4. 清除流状态
-    std::cout.clear();
-    std::cerr.clear();
-}
-#endif
-
 int main(int argc, char *argv[])
 {
-#ifdef Q_OS_WIN
-  CreateMyConsole(); // 创建控制台窗口
-#endif
-
 #if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0) && QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
   QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling); // DPI support
   QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps); // DPI support
