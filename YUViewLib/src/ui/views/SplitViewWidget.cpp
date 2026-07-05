@@ -34,7 +34,7 @@
 
 #include <playlistitem/playlistItem.h>
 #include <ui/PlaybackController.h>
-#include <ui/views/HDR10Widget.h>
+#include <ui/views/OpenGLRenderer.h>
 #include <video/FrameHandler.h>
 #include <video/caching/VideoCache.h>
 
@@ -150,15 +150,15 @@ void splitViewWidget::updateSettings()
   drawItemPathAndNameEnabled = settings.value("ShowFilePathInSplitMode", true).toBool();
 
   // Load color processing settings from QSettings BEFORE creating/showing HDR widgets,
-  // so that the saved values are in member variables when setHDRRenderingMode
+  // so that the saved values are in member variables when setRendererMode
   // creates the widgets and applies settings to them.
-  m_colorEOTF = static_cast<video::HDR10_EOTF>(settings.value("View/EDR_EOTF", 3).toInt());
-  m_colorGamut = static_cast<video::HDR10_ColorGamut>(settings.value("View/EDR_ColorGamut", 1).toInt());
+  m_colorEOTF = static_cast<video::RendererEOTF>(settings.value("View/EDR_EOTF", 3).toInt());
+  m_colorGamut = static_cast<video::RendererColorGamut>(settings.value("View/EDR_ColorGamut", 1).toInt());
   m_colorGamma = settings.value("View/EDR_Gamma", 2.2f).toFloat();
   m_colorDiffuseWhite = settings.value("View/EDR_DiffuseWhite", 203.0f).toFloat();
   m_colorBrightness = settings.value("View/EDR_Brightness", 1.0f).toFloat();
 
-  // Load HDR rendering mode from settings.
+  // Load renderer mode from settings.
   // View/HDRRenderer is a combobox index: 0=Disabled, 1=OpenGL,
   // 2=DXGI (Windows) or EDR (macOS).
   int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
@@ -188,18 +188,18 @@ void splitViewWidget::updateSettings()
   if (rendererIdx == 1 && !settings.value("System/GL33Supported", true).toBool())
     rendererIdx = 0;
 
-  HDRRenderingMode mode = HDRRenderingMode::Disabled;
+  RendererMode mode = RendererMode::Software;
   switch (rendererIdx)
   {
-    case 1:  mode = HDRRenderingMode::GL; break;
+    case 1:  mode = RendererMode::OpenGL; break;
 #ifdef Q_OS_WIN
-    case 2:  mode = HDRRenderingMode::DXGI; break;
+    case 2:  mode = RendererMode::NativeDXGI; break;
 #elif defined(Q_OS_MAC)
-    case 2:  mode = HDRRenderingMode::EDR; break;
+    case 2:  mode = RendererMode::NativeEDR; break;
 #endif
-    default: mode = HDRRenderingMode::Disabled; break;
+    default: mode = RendererMode::Software; break;
   }
-  setHDRRenderingMode(mode, false);
+  setRendererMode(mode, false);
 
   // Always push color settings to active HDR widgets
   applyColorSettingsToWidgets();
@@ -213,185 +213,185 @@ void splitViewWidget::applyColorSettingsToWidgets()
   QSettings settings;
   bool ditheringEnabled = settings.value("View/HDRDithering", false).toBool();
 
-  if (hdr10Widget)
+  if (glRenderer)
   {
-    hdr10Widget->setEOTF(m_colorEOTF);
-    hdr10Widget->setColorGamut(m_colorGamut);
-    hdr10Widget->setGammaValue(m_colorGamma);
-    hdr10Widget->setDiffuseWhiteNits(m_colorDiffuseWhite);
-    hdr10Widget->setHDRBrightness(m_colorBrightness);
-    hdr10Widget->setDithering(ditheringEnabled);
-    hdr10Widget->setPremultipliedAlpha(
+    glRenderer->setEOTF(m_colorEOTF);
+    glRenderer->setColorGamut(m_colorGamut);
+    glRenderer->setGammaValue(m_colorGamma);
+    glRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
+    glRenderer->setHDRBrightness(m_colorBrightness);
+    glRenderer->setDithering(ditheringEnabled);
+    glRenderer->setPremultipliedAlpha(
         settings.value("View/PremultipliedAlpha", true).toBool());
   }
 #ifdef Q_OS_MAC
-  if (hdr10WidgetMacEDR)
+  if (edrRenderer)
   {
-    hdr10WidgetMacEDR->setEOTF(m_colorEOTF);
-    hdr10WidgetMacEDR->setColorGamut(m_colorGamut);
-    hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
-    hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
-    hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
-    hdr10WidgetMacEDR->setPremultipliedAlpha(
+    edrRenderer->setEOTF(m_colorEOTF);
+    edrRenderer->setColorGamut(m_colorGamut);
+    edrRenderer->setGammaValue(m_colorGamma);
+    edrRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
+    edrRenderer->setHDRBrightness(m_colorBrightness);
+    edrRenderer->setPremultipliedAlpha(
         settings.value("View/PremultipliedAlpha", true).toBool());
   }
 #endif
 #ifdef Q_OS_WIN
-  if (hdr10WidgetWin)
+  if (dxgiRenderer)
   {
-    hdr10WidgetWin->setEOTF(m_colorEOTF);
-    hdr10WidgetWin->setColorGamut(m_colorGamut);
-    hdr10WidgetWin->setGammaValue(m_colorGamma);
-    hdr10WidgetWin->setDiffuseWhiteNits(m_colorDiffuseWhite);
-    hdr10WidgetWin->setHDRBrightness(m_colorBrightness);
-    hdr10WidgetWin->setPremultipliedAlpha(
+    dxgiRenderer->setEOTF(m_colorEOTF);
+    dxgiRenderer->setColorGamut(m_colorGamut);
+    dxgiRenderer->setGammaValue(m_colorGamma);
+    dxgiRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
+    dxgiRenderer->setHDRBrightness(m_colorBrightness);
+    dxgiRenderer->setPremultipliedAlpha(
         settings.value("View/PremultipliedAlpha", true).toBool());
   }
 #endif
 }
 
-void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate)
+void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
 {
-  if (hdrRenderingMode == mode)
+  if (rendererMode == mode)
     return;
 
-  hdrRenderingMode = mode;
+  rendererMode = mode;
 
-  bool useDXGI = (mode == HDRRenderingMode::DXGI);
-  bool useOpenGL = (mode == HDRRenderingMode::GL);
-  bool useEDR = (mode == HDRRenderingMode::EDR);
+  bool useDXGI = (mode == RendererMode::NativeDXGI);
+  bool useOpenGL = (mode == RendererMode::OpenGL);
+  bool useEDR = (mode == RendererMode::NativeEDR);
   bool useHDR = useDXGI || useOpenGL || useEDR;
 
   if (useHDR)
   {
 #ifdef Q_OS_MAC
     // macOS: Create MacEDR widget (Metal-based) for EDR support
-    if (!hdr10WidgetMacEDR)
+    if (!edrRenderer)
     {
-      hdr10WidgetMacEDR = std::make_unique<video::HDR10WidgetMacEDR>(this);
-      hdr10WidgetMacEDR->setParent(this);
-      hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
-      hdr10WidgetMacEDR->setZoom(this->zoomFactor);
-      hdr10WidgetMacEDR->setMoveOffset(this->moveOffset);
-      hdr10WidgetMacEDR->setEOTF(m_colorEOTF);
-      hdr10WidgetMacEDR->setColorGamut(m_colorGamut);
-      hdr10WidgetMacEDR->setGammaValue(m_colorGamma);
-      hdr10WidgetMacEDR->setDiffuseWhiteNits(m_colorDiffuseWhite);
-      hdr10WidgetMacEDR->setHDRBrightness(m_colorBrightness);
+      edrRenderer = std::make_unique<video::NativeEDRRenderer>(this);
+      edrRenderer->setParent(this);
+      edrRenderer->setGeometry(0, 0, width(), height());
+      edrRenderer->setZoom(this->zoomFactor);
+      edrRenderer->setMoveOffset(this->moveOffset);
+      edrRenderer->setEOTF(m_colorEOTF);
+      edrRenderer->setColorGamut(m_colorGamut);
+      edrRenderer->setGammaValue(m_colorGamma);
+      edrRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      edrRenderer->setHDRBrightness(m_colorBrightness);
 
       // Read premultiplied alpha setting at creation time so the initial
       // render uses the correct mode (otherwise it defaults to true).
       QSettings premulSettings;
-      hdr10WidgetMacEDR->setPremultipliedAlpha(
+      edrRenderer->setPremultipliedAlpha(
           premulSettings.value("View/PremultipliedAlpha", true).toBool());
     }
 
     if (useEDR)
     {
-      hdr10WidgetMacEDR->show();
-      hdr10WidgetMacEDR->raise();
+      edrRenderer->show();
+      edrRenderer->raise();
     }
     else
     {
       // Release the Metal renderer when not in EDR mode.
-      hdr10WidgetMacEDR->hide();
-      hdr10WidgetMacEDR.reset();
+      edrRenderer->hide();
+      edrRenderer.reset();
     }
 #endif
 
 #ifdef Q_OS_WIN
     // Windows: Create DXGI HDR widget for native HDR output
-    if (!hdr10WidgetWin)
+    if (!dxgiRenderer)
     {
-      hdr10WidgetWin = std::make_unique<video::HDR10WidgetWinDXGI>(this);
-      hdr10WidgetWin->setParent(this);
-      hdr10WidgetWin->setGeometry(0, 0, width(), height());
-      hdr10WidgetWin->setZoom(this->zoomFactor);
-      hdr10WidgetWin->setMoveOffset(this->moveOffset);
-      hdr10WidgetWin->setEOTF(m_colorEOTF);
-      hdr10WidgetWin->setColorGamut(m_colorGamut);
-      hdr10WidgetWin->setGammaValue(m_colorGamma);
-      hdr10WidgetWin->setDiffuseWhiteNits(m_colorDiffuseWhite);
-      hdr10WidgetWin->setHDRBrightness(m_colorBrightness);
+      dxgiRenderer = std::make_unique<video::NativeDXGIRenderer>(this);
+      dxgiRenderer->setParent(this);
+      dxgiRenderer->setGeometry(0, 0, width(), height());
+      dxgiRenderer->setZoom(this->zoomFactor);
+      dxgiRenderer->setMoveOffset(this->moveOffset);
+      dxgiRenderer->setEOTF(m_colorEOTF);
+      dxgiRenderer->setColorGamut(m_colorGamut);
+      dxgiRenderer->setGammaValue(m_colorGamma);
+      dxgiRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      dxgiRenderer->setHDRBrightness(m_colorBrightness);
 
       // Forward HDR status changes
-      connect(hdr10WidgetWin.get(), &video::HDR10WidgetWinDXGI::hdrStatusChanged,
-              this, &splitViewWidget::hdrStatusChanged);
+      connect(dxgiRenderer.get(), &video::NativeDXGIRenderer::rendererStatusChanged,
+              this, &splitViewWidget::rendererStatusChanged);
     }
 
     if (useDXGI)
     {
-      hdr10WidgetWin->show();
-      hdr10WidgetWin->raise();
+      dxgiRenderer->show();
+      dxgiRenderer->raise();
     }
     else
     {
       // Release the DXGI swap chain when not in DXGI mode.
-      hdr10WidgetWin->hide();
-      hdr10WidgetWin.reset();
+      dxgiRenderer->hide();
+      dxgiRenderer.reset();
     }
 #endif
 
-    // Also create OpenGL HDR10Widget as fallback
-    if (!hdr10Widget)
+    // Also create OpenGL OpenGLRenderer as fallback
+    if (!glRenderer)
     {
-      hdr10Widget = std::make_unique<video::HDR10Widget>(this);
-      hdr10Widget->setParent(this);
-      hdr10Widget->setGeometry(0, 0, width(), height());
-      hdr10Widget->raise();
-      hdr10Widget->setZoom(this->zoomFactor);
-      hdr10Widget->setMoveOffset(this->moveOffset);
-      hdr10Widget->setEOTF(m_colorEOTF);
-      hdr10Widget->setColorGamut(m_colorGamut);
-      hdr10Widget->setGammaValue(m_colorGamma);
-      hdr10Widget->setDiffuseWhiteNits(m_colorDiffuseWhite);
-      hdr10Widget->setHDRBrightness(m_colorBrightness);
+      glRenderer = std::make_unique<video::OpenGLRenderer>(this);
+      glRenderer->setParent(this);
+      glRenderer->setGeometry(0, 0, width(), height());
+      glRenderer->raise();
+      glRenderer->setZoom(this->zoomFactor);
+      glRenderer->setMoveOffset(this->moveOffset);
+      glRenderer->setEOTF(m_colorEOTF);
+      glRenderer->setColorGamut(m_colorGamut);
+      glRenderer->setGammaValue(m_colorGamma);
+      glRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
+      glRenderer->setHDRBrightness(m_colorBrightness);
 
       QSettings ditherSettings;
       bool ditheringEnabled = ditherSettings.value("View/HDRDithering", false).toBool();
-      hdr10Widget->setDithering(ditheringEnabled);
-      hdr10Widget->setPremultipliedAlpha(
+      glRenderer->setDithering(ditheringEnabled);
+      glRenderer->setPremultipliedAlpha(
           ditherSettings.value("View/PremultipliedAlpha", true).toBool());
 
       // Forward ACM/HDR status from OpenGL widget to dock
-      connect(hdr10Widget.get(), &video::HDR10Widget::hdrStatusChanged,
-              this, &splitViewWidget::hdrStatusChanged);
+      connect(glRenderer.get(), &video::OpenGLRenderer::rendererStatusChanged,
+              this, &splitViewWidget::rendererStatusChanged);
     }
 
     // Show OpenGL widget only when it's the active backend
     if (useOpenGL)
-      hdr10Widget->show();
+      glRenderer->show();
     else
     {
       // Release OpenGL resources when not in GL mode.
-      hdr10Widget->hide();
-      hdr10Widget.reset();
+      glRenderer->hide();
+      glRenderer.reset();
     }
   }
   else
   {
 #ifdef Q_OS_MAC
-    if (hdr10WidgetMacEDR)
+    if (edrRenderer)
     {
-      hdr10WidgetMacEDR->hide();
-      hdr10WidgetMacEDR.reset();
+      edrRenderer->hide();
+      edrRenderer.reset();
     }
 #endif
 #ifdef Q_OS_WIN
-    if (hdr10WidgetWin)
+    if (dxgiRenderer)
     {
       // On Wine/CrossOver, hide() alone doesn't remove the native HWND
       // (DXGI swap chain) from the screen. Destroy the widget entirely
       // so the HWND and swap chain are released. It will be recreated
       // if the user switches back to DXGI mode.
-      hdr10WidgetWin->hide();
-      hdr10WidgetWin.reset();
+      dxgiRenderer->hide();
+      dxgiRenderer.reset();
     }
 #endif
-    if (hdr10Widget)
+    if (glRenderer)
     {
-      hdr10Widget->hide();
-      hdr10Widget.reset();
+      glRenderer->hide();
+      glRenderer.reset();
     }
     raise();
   }
@@ -400,35 +400,35 @@ void splitViewWidget::setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate
     update();
 }
 
-bool splitViewWidget::isHDRSupported() const
+bool splitViewWidget::isRendererSupported() const
 {
 #ifdef Q_OS_MAC
-  // On macOS, EDR is supported via Metal-based HDR10WidgetMacEDR
-  if (hdr10WidgetMacEDR && hdr10WidgetMacEDR->isEDRSupported())
+  // On macOS, EDR is supported via Metal-based NativeEDRRenderer
+  if (edrRenderer && edrRenderer->isEDRSupported())
     return true;
 #endif
 #ifdef Q_OS_WIN
   // On Windows, HDR is supported via DXGI or OpenGL
-  if (hdr10WidgetWin && hdr10WidgetWin->isHDRActive())
+  if (dxgiRenderer && dxgiRenderer->isHDRActive())
     return true;
 #endif
-  // HDR is supported if we have an HDR10Widget and it supports 10-bit output
-  return hdr10Widget && hdr10Widget->supports10bit();
+  // HDR is supported if we have an OpenGLRenderer and it supports 10-bit output
+  return glRenderer && glRenderer->supports10bit();
 }
 
 void splitViewWidget::resizeEvent(QResizeEvent *event)
 {
   MoveAndZoomableView::resizeEvent(event);
   // Update HDR widget geometry when SplitView is resized
-  if (hdr10Widget && hdr10Widget->isVisible())
-    hdr10Widget->setGeometry(0, 0, width(), height());
+  if (glRenderer && glRenderer->isVisible())
+    glRenderer->setGeometry(0, 0, width(), height());
 #ifdef Q_OS_MAC
-  if (hdr10WidgetMacEDR && hdr10WidgetMacEDR->isVisible())
-    hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
+  if (edrRenderer && edrRenderer->isVisible())
+    edrRenderer->setGeometry(0, 0, width(), height());
 #endif
 #ifdef Q_OS_WIN
-  if (hdr10WidgetWin && hdr10WidgetWin->isVisible())
-    hdr10WidgetWin->setGeometry(0, 0, width(), height());
+  if (dxgiRenderer && dxgiRenderer->isVisible())
+    dxgiRenderer->setGeometry(0, 0, width(), height());
 #endif
 }
 
@@ -683,64 +683,64 @@ void splitViewWidget::paintEvent(QPaintEvent *)
     {
       centerPoints[0] = drawArea_botR / 2;
 
-      // HDR rendering: Use platform-specific HDR widget if enabled
+      // renderer: Use platform-specific HDR widget if enabled
       bool useHDRWidget = false;
 
 #ifdef Q_OS_MAC
-      if (hdrRenderingMode == HDRRenderingMode::EDR && hdr10WidgetMacEDR && !waitingForCaching)
+      if (rendererMode == RendererMode::NativeEDR && edrRenderer && !waitingForCaching)
       {
-        hdr10WidgetMacEDR->setGeometry(0, 0, width(), height());
+        edrRenderer->setGeometry(0, 0, width(), height());
         if (auto frameHandler = item[0]->getFrameHandler())
         {
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
-          hdr10WidgetMacEDR->setFrame(videoFrame);
-          hdr10WidgetMacEDR->setFrameHandler(frameHandler);
+          edrRenderer->setFrame(videoFrame);
+          edrRenderer->setFrameHandler(frameHandler);
         }
-        hdr10WidgetMacEDR->setShowRawData(drawRawValues);
+        edrRenderer->setShowRawData(drawRawValues);
         useHDRWidget = true;
       }
 #endif
 
 #ifdef Q_OS_WIN
-      if (!useHDRWidget && hdrRenderingMode == HDRRenderingMode::DXGI && hdr10WidgetWin && !waitingForCaching)
+      if (!useHDRWidget && rendererMode == RendererMode::NativeDXGI && dxgiRenderer && !waitingForCaching)
       {
-        hdr10WidgetWin->setGeometry(0, 0, width(), height());
-        hdr10WidgetWin->setZoom(this->zoomFactor);
-        hdr10WidgetWin->setMoveOffset(this->moveOffset);
+        dxgiRenderer->setGeometry(0, 0, width(), height());
+        dxgiRenderer->setZoom(this->zoomFactor);
+        dxgiRenderer->setMoveOffset(this->moveOffset);
         if (auto frameHandler = item[0]->getFrameHandler())
         {
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
-          hdr10WidgetWin->setFrame(videoFrame);
-          hdr10WidgetWin->setFrameHandler(frameHandler);
+          dxgiRenderer->setFrame(videoFrame);
+          dxgiRenderer->setFrameHandler(frameHandler);
         }
-        hdr10WidgetWin->setShowRawData(drawRawValues);
+        dxgiRenderer->setShowRawData(drawRawValues);
         useHDRWidget = true;
       }
 #endif
 
-      if (!useHDRWidget && hdrRenderingMode == HDRRenderingMode::GL && hdr10Widget && !waitingForCaching)
+      if (!useHDRWidget && rendererMode == RendererMode::OpenGL && glRenderer && !waitingForCaching)
       {
-        hdr10Widget->setGeometry(0, 0, width(), height());
+        glRenderer->setGeometry(0, 0, width(), height());
         if (auto frameHandler = item[0]->getFrameHandler())
         {
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
-          hdr10Widget->setFrame(videoFrame);
-          hdr10Widget->setFrameHandler(frameHandler);
+          glRenderer->setFrame(videoFrame);
+          glRenderer->setFrameHandler(frameHandler);
         }
-        hdr10Widget->setShowRawData(drawRawValues);
+        glRenderer->setShowRawData(drawRawValues);
         useHDRWidget = true;
       }
       else if (!useHDRWidget)
       {
-        if (hdr10Widget)
-          hdr10Widget->hide();
+        if (glRenderer)
+          glRenderer->hide();
       }
 
       // Translate the painter to the position where we want the item to be
       painter.translate(centerPoints[0] + offset);
 
-      // Draw the item at position (0,0) - only if not using HDR rendering
-      bool hdrActive = (hdrRenderingMode != HDRRenderingMode::Disabled) && useHDRWidget;
+      // Draw the item at position (0,0) - only if not using renderer
+      bool hdrActive = (rendererMode != RendererMode::Software) && useHDRWidget;
       if (!waitingForCaching && !hdrActive)
       {
         painter.setFont(
@@ -1390,15 +1390,15 @@ void splitViewWidget::setMoveOffset(QPointF offset)
   MoveAndZoomableView::setMoveOffset(offset);
 
   // Update HDR widget with new offset
-  if (hdr10Widget)
-    hdr10Widget->setMoveOffset(offset);
+  if (glRenderer)
+    glRenderer->setMoveOffset(offset);
 #ifdef Q_OS_MAC
-  if (hdr10WidgetMacEDR)
-    hdr10WidgetMacEDR->setMoveOffset(offset);
+  if (edrRenderer)
+    edrRenderer->setMoveOffset(offset);
 #endif
 #ifdef Q_OS_WIN
-  if (hdr10WidgetWin)
-    hdr10WidgetWin->setMoveOffset(offset);
+  if (dxgiRenderer)
+    dxgiRenderer->setMoveOffset(offset);
 #endif
 
   if (this->isMasterView)
@@ -1468,15 +1468,15 @@ void splitViewWidget::setZoomFactor(double zoom)
   MoveAndZoomableView::setZoomFactor(zoom);
 
   // Update HDR widget with new zoom
-  if (hdr10Widget)
-    hdr10Widget->setZoom(zoom);
+  if (glRenderer)
+    glRenderer->setZoom(zoom);
 #ifdef Q_OS_MAC
-  if (hdr10WidgetMacEDR)
-    hdr10WidgetMacEDR->setZoom(zoom);
+  if (edrRenderer)
+    edrRenderer->setZoom(zoom);
 #endif
 #ifdef Q_OS_WIN
-  if (hdr10WidgetWin)
-    hdr10WidgetWin->setZoom(zoom);
+  if (dxgiRenderer)
+    dxgiRenderer->setZoom(zoom);
 #endif
 
   if (this->isMasterView)
@@ -1766,56 +1766,56 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
   if (!item1 && !item2)
   {
     // Hide HDR widgets when no items are selected
-    if (hdr10Widget)
-      hdr10Widget->hide();
+    if (glRenderer)
+      glRenderer->hide();
 #ifdef Q_OS_MAC
-    if (hdr10WidgetMacEDR)
-      hdr10WidgetMacEDR->hide();
+    if (edrRenderer)
+      edrRenderer->hide();
 #endif
 #ifdef Q_OS_WIN
-    if (hdr10WidgetWin)
+    if (dxgiRenderer)
     {
-      hdr10WidgetWin->hide();
-      hdr10WidgetWin->lower();
+      dxgiRenderer->hide();
+      dxgiRenderer->lower();
     }
 #endif
     return;
   }
 
   // Show the active HDR widget, hide all others (paintEvent will feed it frames).
-  // Visibility is driven solely by hdrRenderingMode.
+  // Visibility is driven solely by rendererMode.
 #ifdef Q_OS_MAC
-  if (hdrRenderingMode == HDRRenderingMode::EDR && hdr10WidgetMacEDR)
+  if (rendererMode == RendererMode::NativeEDR && edrRenderer)
   {
-    hdr10WidgetMacEDR->show();
-    if (hdr10Widget)
-      hdr10Widget->hide();
+    edrRenderer->show();
+    if (glRenderer)
+      glRenderer->hide();
   }
   else
   {
-    if (hdr10WidgetMacEDR)
-      hdr10WidgetMacEDR->hide();
+    if (edrRenderer)
+      edrRenderer->hide();
   }
 #endif
 #ifdef Q_OS_WIN
-  if (hdrRenderingMode == HDRRenderingMode::DXGI && hdr10WidgetWin)
+  if (rendererMode == RendererMode::NativeDXGI && dxgiRenderer)
   {
-    hdr10WidgetWin->show();
-    hdr10WidgetWin->raise();
+    dxgiRenderer->show();
+    dxgiRenderer->raise();
   }
   else
   {
-    if (hdr10WidgetWin)
+    if (dxgiRenderer)
     {
-      hdr10WidgetWin->hide();
-      hdr10WidgetWin->lower();
+      dxgiRenderer->hide();
+      dxgiRenderer->lower();
     }
   }
 #endif
-  if (hdrRenderingMode == HDRRenderingMode::GL && hdr10Widget)
-    hdr10Widget->show();
-  else if (hdr10Widget)
-    hdr10Widget->hide();
+  if (rendererMode == RendererMode::OpenGL && glRenderer)
+    glRenderer->show();
+  else if (glRenderer)
+    glRenderer->hide();
 
   QSettings settings;
   bool savePositionAndZoomPerItem = settings.value("SavePositionAndZoomPerItem", false).toBool();

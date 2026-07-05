@@ -29,7 +29,7 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "HDR10Widget.h"
+#include "OpenGLRenderer.h"
 
 #include <video/FrameHandler.h>
 #include <video/yuv/videoHandlerYUV.h>
@@ -49,7 +49,7 @@ namespace video
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
 
-HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
+OpenGLRenderer::OpenGLRenderer(QWidget *parent) : QOpenGLWidget(parent)
 {
   // Disable auto-fill background to prevent Qt from clearing our OpenGL content
   setAutoFillBackground(false);
@@ -81,7 +81,7 @@ HDR10Widget::HDR10Widget(QWidget *parent) : QOpenGLWidget(parent)
   m_pixelOverlay->show();
 }
 
-HDR10Widget::~HDR10Widget()
+OpenGLRenderer::~OpenGLRenderer()
 {
   // QOpenGLWidget's destructor will makeCurrent() and destroyFbos() internally.
   // We must clean up our own GL resources (texture, VBO, VAO, shaders) BEFORE
@@ -113,7 +113,7 @@ HDR10Widget::~HDR10Widget()
   }
 }
 
-void HDR10Widget::setFrame(const VideoFrame &frame)
+void OpenGLRenderer::setFrame(const VideoFrame &frame)
 {
   // Only update if frame data actually changed
   // Compare 16-bit buffer pointers to detect if it's the same frame data
@@ -136,34 +136,34 @@ void HDR10Widget::setFrame(const VideoFrame &frame)
   }
 }
 
-void HDR10Widget::setDithering(bool enable)
+void OpenGLRenderer::setDithering(bool enable)
 {
   m_ditheringEnabled = enable;
   updatePixelOverlay();
   update();
 }
 
-void HDR10Widget::setZoom(double zoom)
+void OpenGLRenderer::setZoom(double zoom)
 {
   m_zoom = zoom;
   update();             // Trigger OpenGL re-render (vertices changed)
   updatePixelOverlay(); // Update QPainter overlay
 }
 
-void HDR10Widget::setMoveOffset(QPointF offset)
+void OpenGLRenderer::setMoveOffset(QPointF offset)
 {
   m_moveOffset = offset;
   update();             // Trigger OpenGL re-render (vertices changed)
   updatePixelOverlay(); // Update QPainter overlay
 }
 
-void HDR10Widget::updatePixelOverlay()
+void OpenGLRenderer::updatePixelOverlay()
 {
   if (m_pixelOverlay)
     m_pixelOverlay->update();
 }
 
-void HDR10Widget::initializeGL()
+void OpenGLRenderer::initializeGL()
 {
   initializeOpenGLFunctions();
 
@@ -186,7 +186,7 @@ void HDR10Widget::initializeGL()
   // treat the entire query as unreliable and fall back to safe defaults
   if (greenBits < 0 || blueBits < 0 || greenBits == 0 && blueBits == 0)
   {
-    qInfo() << "HDR10Widget: Framebuffer bit depth query returned unreliable values"
+    qInfo() << "OpenGLRenderer: Framebuffer bit depth query returned unreliable values"
             << "(" << redBits << "/" << greenBits << "/" << blueBits << "bits),"
             << "assuming 8-bit default buffer";
     redBits = 8;
@@ -199,12 +199,12 @@ void HDR10Widget::initializeGL()
   {
     // Fall back to 8-bit rendering
     m_bitDepth = 8;
-    qInfo() << "HDR10Widget: 10-bit not supported, falling back to" << m_bitDepth << "bit ("
+    qInfo() << "OpenGLRenderer: 10-bit not supported, falling back to" << m_bitDepth << "bit ("
             << redBits << "/" << greenBits << "/" << blueBits << "bits)";
   }
   else
   {
-    qInfo() << "HDR10Widget: 10-bit supported (" << redBits << "/" << greenBits << "/" << blueBits << "bits)";
+    qInfo() << "OpenGLRenderer: 10-bit supported (" << redBits << "/" << greenBits << "/" << blueBits << "bits)";
   }
 
 
@@ -212,7 +212,7 @@ void HDR10Widget::initializeGL()
                      .arg(version, renderer)
                      .arg(m_bitDepth);
 
-  qInfo() << "HDR10Widget:" << m_openglInfo;
+  qInfo() << "OpenGLRenderer:" << m_openglInfo;
 
   initShaders();
   initGeometry();
@@ -223,24 +223,24 @@ void HDR10Widget::initializeGL()
   m_initialized = true;
 }
 
-void HDR10Widget::initShaders()
+void OpenGLRenderer::initShaders()
 {
   m_program = std::make_shared<QOpenGLShaderProgram>(this);
-  m_program->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
-  m_program->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/hdr10_fragment.glsl");
+  m_program->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/opengl_vertex.glsl");
+  m_program->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/opengl_fragment.glsl");
   if (!m_program->link())
-    qWarning() << "HDR10Widget: Standard shader link error:" << m_program->log();
+    qWarning() << "OpenGLRenderer: Standard shader link error:" << m_program->log();
 
   m_programDither = std::make_shared<QOpenGLShaderProgram>(this);
-  m_programDither->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/hdr10_vertex.glsl");
+  m_programDither->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/opengl_vertex.glsl");
   m_programDither->addShaderFromSourceFile(QOpenGLShader::Fragment,
-                                           ":/shaders/hdr10_fragment_dither.glsl");
+                                           ":/shaders/opengl_fragment_dither.glsl");
   if (!m_programDither->link())
-    qWarning() << "HDR10Widget: Dither shader link error:" << m_programDither->log();
+    qWarning() << "OpenGLRenderer: Dither shader link error:" << m_programDither->log();
 
 }
 
-void HDR10Widget::initGeometry()
+void OpenGLRenderer::initGeometry()
 {
   GLfloat vertices[] = {
     -1.0f,
@@ -277,7 +277,7 @@ void HDR10Widget::initGeometry()
   m_vbo.release();
 }
 
-void HDR10Widget::updateTexture()
+void OpenGLRenderer::updateTexture()
 {
   if (!m_currentFrame.isValid())
     return;
@@ -349,7 +349,7 @@ void HDR10Widget::updateTexture()
   m_frameNeedsUpdate = false;
 }
 
-void HDR10Widget::resizeGL(int w, int h)
+void OpenGLRenderer::resizeGL(int w, int h)
 {
   glViewport(0, 0, w, h);
 
@@ -358,7 +358,7 @@ void HDR10Widget::resizeGL(int w, int h)
     m_pixelOverlay->setGeometry(0, 0, w, h);
 }
 
-void HDR10Widget::paintGL()
+void OpenGLRenderer::paintGL()
 {
   // Bind the correct framebuffer (QOpenGLWidget uses an internal FBO)
   glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
@@ -454,7 +454,7 @@ void HDR10Widget::paintGL()
 
   // EDR output (>1.0 values) is NOT possible through QOpenGLWidget on macOS
   // (internal FBO is 8-bit RGBA). On macOS, EDR is handled by the Metal-based
-  // HDR10WidgetMacEDR. This widget always uses the standard or dither shader.
+  // NativeEDRRenderer. This widget always uses the standard or dither shader.
   if (m_ditheringEnabled)
   {
     currentProgram = m_programDither;
@@ -501,7 +501,7 @@ void HDR10Widget::paintGL()
   {
     m_lastAcmActive = acmActive;
     // OpenGL path: hdrActive=false, systemHandlesTonemapping reflects ACM
-    emit hdrStatusChanged(false, acmActive, 0.0f, 0.0f);
+    emit rendererStatusChanged(false, acmActive, 0.0f, 0.0f);
   }
   const bool surfaceIsSRGB =
       (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
@@ -535,7 +535,7 @@ void HDR10Widget::paintGL()
   // Shader manually does sRGB OETF (GL_FRAMEBUFFER_SRGB is not used due to
   // Qt NSView backing store double-encode issue).
   // Reinhard tonemapping only for HDR content (PQ/HLG).
-  bool isHDREOTF = (m_eotf == video::HDR10_EOTF::PQ || m_eotf == video::HDR10_EOTF::HLG);
+  bool isHDREOTF = (m_eotf == video::RendererEOTF::PQ || m_eotf == video::RendererEOTF::HLG);
   glUniform1f(currentProgram->uniformLocation("systemHandlesTonemapping"), isHDREOTF ? 0.0f : 1.0f);
   glUniform1f(currentProgram->uniformLocation("applySRGBOETF"), 1.0f);
   glUniform1i(currentProgram->uniformLocation("premultipliedAlpha"), m_premultipliedAlpha ? 1 : 0);
@@ -549,7 +549,7 @@ void HDR10Widget::paintGL()
   glFinish();
 }
 
-void HDR10Widget::drawPixelValues(QPainter *painter)
+void OpenGLRenderer::drawPixelValues(QPainter *painter)
 {
   if (!m_showRawData || m_zoom < SHOW_PIXEL_VALUES_ZOOM_THRESHOLD)
     return;
@@ -725,7 +725,7 @@ void HDR10Widget::drawPixelValues(QPainter *painter)
   }
 }
 
-void HDR10Widget::drawZoomIndicator(QPainter *painter)
+void OpenGLRenderer::drawZoomIndicator(QPainter *painter)
 {
   if (m_zoom == 1.0)
     return;
@@ -744,7 +744,7 @@ void HDR10Widget::drawZoomIndicator(QPainter *painter)
   painter->drawText(pos, zoomString);
 }
 
-void HDR10Widget::drawPixelRulers(QPainter *painter)
+void OpenGLRenderer::drawPixelRulers(QPainter *painter)
 {
   if (!m_frameHandler || m_zoom < 32.0)
     return;
@@ -831,7 +831,7 @@ void HDR10Widget::drawPixelRulers(QPainter *painter)
 }
 
 // PixelOverlay implementation
-HDR10Widget::PixelOverlay::PixelOverlay(HDR10Widget *parent)
+OpenGLRenderer::PixelOverlay::PixelOverlay(OpenGLRenderer *parent)
   : QWidget(parent), hdrWidget(parent)
 {
   setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -839,7 +839,7 @@ HDR10Widget::PixelOverlay::PixelOverlay(HDR10Widget *parent)
   setAutoFillBackground(false);
 }
 
-void HDR10Widget::PixelOverlay::paintEvent(QPaintEvent *)
+void OpenGLRenderer::PixelOverlay::paintEvent(QPaintEvent *)
 {
   if (!hdrWidget)
     return;

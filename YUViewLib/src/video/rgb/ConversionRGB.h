@@ -63,7 +63,7 @@ rgba_t getPixelValueFromBuffer(const QByteArray &    sourceBuffer,
                                const Size            frameSize,
                                const QPoint &        pixelPos);
 
-// Convert raw RGB data to 16-bit RGBA buffer for HDR rendering
+// Convert raw RGB data to 16-bit RGBA buffer for renderer
 // This function converts the input format (8-16 bits per sample) to a standard 16-bit RGBA output.
 // The output is always in RGBA order, 16 bits per channel, suitable for OpenGL HDR textures.
 // For input bit depth < 16, values are left-shifted to fill the 16-bit range.

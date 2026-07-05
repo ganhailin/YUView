@@ -70,13 +70,13 @@ using MacEDR_ColorGamut = color::ColorGamut;
  *   16-bit RGBA 数据 → EOTF(PQ/HLG/sRGB/Gamma) → diffuse white 归一化
  *   → 色域转换(BT.2020/BT.709/P3 → Display P3) → HDR 亮度调整 → EDR 输出
  */
-class HDR10WidgetMacEDR : public QWidget
+class NativeEDRRenderer : public QWidget
 {
   Q_OBJECT
 
 public:
-  explicit HDR10WidgetMacEDR(QWidget *parent = nullptr);
-  ~HDR10WidgetMacEDR() override;
+  explicit NativeEDRRenderer(QWidget *parent = nullptr);
+  ~NativeEDRRenderer() override;
 
   // 数据设置
   void setFrame(const VideoFrame &frame);
@@ -102,7 +102,7 @@ public:
   float getMaxEDRValue() const;
   QString getRendererInfo() const;
 
-  // 像素值覆盖层（与 HDR10Widget 相同的接口）
+  // 像素值覆盖层（与 OpenGLRenderer 相同的接口）
   void updatePixelOverlay();
   void drawPixelValues(QPainter *painter);
   void drawZoomIndicator(QPainter *painter);

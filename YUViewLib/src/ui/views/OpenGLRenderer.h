@@ -49,16 +49,16 @@ namespace video
 class FrameHandler;
 
 // Aliases for backward compatibility — use color:: enums internally
-using HDR10_EOTF       = color::EOTF;
-using HDR10_ColorGamut = color::ColorGamut;
+using RendererEOTF       = color::EOTF;
+using RendererColorGamut = color::ColorGamut;
 
-class HDR10Widget : public QOpenGLWidget, protected QOpenGLFunctions
+class OpenGLRenderer : public QOpenGLWidget, protected QOpenGLFunctions
 {
   Q_OBJECT
 
 public:
-  explicit HDR10Widget(QWidget *parent = nullptr);
-  ~HDR10Widget() override;
+  explicit OpenGLRenderer(QWidget *parent = nullptr);
+  ~OpenGLRenderer() override;
 
   void setFrame(const VideoFrame &frame);
   void setFrameHandler(FrameHandler *handler) { m_frameHandler = handler; }
@@ -74,8 +74,8 @@ public:
   }
 
   // EOTF and color gamut control (used in macOS EDR shader path)
-  void setEOTF(HDR10_EOTF eotf) { m_eotf = eotf; update(); }
-  void setColorGamut(HDR10_ColorGamut gamut) { m_colorGamut = gamut; update(); }
+  void setEOTF(RendererEOTF eotf) { m_eotf = eotf; update(); }
+  void setColorGamut(RendererColorGamut gamut) { m_colorGamut = gamut; update(); }
   void setGammaValue(float gamma) { m_gammaValue = gamma; update(); }
   void setDiffuseWhiteNits(float nits) { m_diffuseWhiteNits = nits; update(); }
   void setHDRBrightness(float brightness) { m_hdrBrightness = brightness; update(); }
@@ -90,7 +90,7 @@ signals:
   /// On Windows, reflects ACM (Auto Color Management) status.
   /// hdrActive is always false for the OpenGL path (no HDR via QOpenGLWidget).
   /// systemHandlesTonemapping is true when ACM is active.
-  void hdrStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
+  void rendererStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
                         float maxNits, float sdrWhiteNits);
 
 protected:
@@ -111,11 +111,11 @@ private:
   class PixelOverlay : public QWidget
   {
   public:
-    explicit PixelOverlay(HDR10Widget *parent);
+    explicit PixelOverlay(OpenGLRenderer *parent);
     void paintEvent(QPaintEvent *event) override;
 
   private:
-    HDR10Widget *hdrWidget;
+    OpenGLRenderer *hdrWidget;
   };
 
   std::shared_ptr<QOpenGLShaderProgram> m_program;
@@ -140,8 +140,8 @@ private:
   QString m_openglInfo;
 
   // EDR and color processing parameters (used by EDR shader on macOS)
-  HDR10_EOTF       m_eotf{HDR10_EOTF::SRGB};
-  HDR10_ColorGamut m_colorGamut{HDR10_ColorGamut::BT709};
+  RendererEOTF       m_eotf{RendererEOTF::SRGB};
+  RendererColorGamut m_colorGamut{RendererColorGamut::BT709};
   float            m_gammaValue{2.2f};
   float            m_diffuseWhiteNits{203.0f};
   float            m_hdrBrightness{1.0f};

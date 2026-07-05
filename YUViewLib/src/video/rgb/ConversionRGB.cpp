@@ -390,7 +390,7 @@ rgba_t getPixelValueFromBuffer(const QByteArray     &sourceBuffer,
     return getPixelValue<32>(sourceBuffer, srcPixelFormat, frameSize, pixelPos);
 }
 
-// Convert input RGB data to 16-bit RGBA output for HDR rendering.
+// Convert input RGB data to 16-bit RGBA output for renderer.
 // Template parameter bitDepth is the bit depth of the input data (8, 16, or 32).
 // Output is always 16-bit per channel in RGBA order.
 template <int bitDepth>

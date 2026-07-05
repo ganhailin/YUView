@@ -308,7 +308,7 @@ bool DXGISwapChain::detectHDRCapabilities()
 
   // ── ACM detection: delegated to shared functionsGui::isWindowsACMEnabled() ──
   // Uses DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO (type 9), same API
-  // as the inline code below would use.  Shared with the OpenGL HDR10Widget path.
+  // as the inline code below would use.  Shared with the OpenGL OpenGLRenderer path.
   m_caps.acmActive = false;
   m_caps.systemHandlesTonemapping = m_caps.hdrActive;
 

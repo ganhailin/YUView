@@ -35,13 +35,13 @@
 
 #include <common/SaveUi.h>
 #include <common/Typedef.h>
-#include <ui/views/HDR10Widget.h>
+#include <ui/views/OpenGLRenderer.h>
 
 #ifdef Q_OS_MAC
-#include <ui/views/HDR10WidgetMacEDR.h>
+#include <ui/views/NativeEDRRenderer.h>
 #endif
 #ifdef Q_OS_WIN
-#include <ui/views/HDR10WidgetWinDXGI.h>
+#include <ui/views/NativeDXGIRenderer.h>
 #endif
 
 #include <ui/views/MoveAndZoomableView.h>
@@ -120,21 +120,21 @@ public:
     return this->zoomFactor >= SPLITVIEW_DRAW_VALUES_ZOOMFACTOR || this->drawZoomBox;
   }
 
-  // HDR rendering mode
-  enum class HDRRenderingMode
+  // renderer mode
+  enum class RendererMode
   {
-    Disabled,     // Use standard QPainter rendering (8-bit)
-    GL,      // Use HDR10Widget for OpenGL rendering (10-bit capable)
-    DXGI,         // Use HDR10WidgetWinDXGI for native Windows HDR (DXGI/D3D11)
-    EDR           // Use HDR10WidgetMacEDR for macOS Metal EDR rendering
+    Software,     // Use standard QPainter rendering (8-bit)
+    OpenGL,       // Use OpenGLRenderer for OpenGL rendering (10-bit capable)
+    NativeDXGI,   // Use NativeDXGIRenderer for native Windows HDR (DXGI/D3D11)
+    NativeEDR     // Use NativeEDRRenderer for macOS Metal EDR rendering
   };
 
-  // Get and set the HDR rendering mode
-  HDRRenderingMode getHDRRenderingMode() const { return hdrRenderingMode; }
-  void             setHDRRenderingMode(HDRRenderingMode mode, bool callUpdate = true);
+  // Get and set the renderer mode
+  RendererMode getRendererMode() const { return rendererMode; }
+  void             setRendererMode(RendererMode mode, bool callUpdate = true);
 
-  // Check if HDR rendering is supported by the current OpenGL context
-  bool isHDRSupported() const;
+  // Check if renderer is supported by the current OpenGL context
+  bool isRendererSupported() const;
 
   // Apply color settings to active HDR widgets (without changing HDR mode)
   void applyColorSettingsToWidgets();
@@ -155,7 +155,7 @@ signals:
   void signalToggleFullScreen();
 
   // HDR status changed (hdrActive, systemHandlesTonemapping, max nits, SDR white nits)
-  void hdrStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
+  void rendererStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
                         float maxNits, float sdrWhiteNits);
 
 public slots:
@@ -309,24 +309,24 @@ protected:
   QPointer<PlaybackController> playback;
   QPointer<video::VideoCache>  cache;
 
-  // HDR rendering
-  HDRRenderingMode                      hdrRenderingMode{HDRRenderingMode::Disabled};
-  std::unique_ptr<video::HDR10Widget>   hdr10Widget;
+  // renderer
+  RendererMode                      rendererMode{RendererMode::Software};
+  std::unique_ptr<video::OpenGLRenderer>   glRenderer;
 
   // Color processing parameters (cross-platform, used by both OpenGL and Metal paths)
-  video::HDR10_EOTF       m_colorEOTF{video::HDR10_EOTF::SRGB};
-  video::HDR10_ColorGamut m_colorGamut{video::HDR10_ColorGamut::BT709};
+  video::RendererEOTF       m_colorEOTF{video::RendererEOTF::SRGB};
+  video::RendererColorGamut m_colorGamut{video::RendererColorGamut::BT709};
   float                   m_colorGamma{2.2f};
   float                   m_colorDiffuseWhite{203.0f};
   float                   m_colorBrightness{1.0f};
 
 #ifdef Q_OS_MAC
   // macOS EDR: Metal-based renderer widget (more reliable EDR than OpenGL on macOS)
-  std::unique_ptr<video::HDR10WidgetMacEDR> hdr10WidgetMacEDR;
+  std::unique_ptr<video::NativeEDRRenderer> edrRenderer;
 #endif
 #ifdef Q_OS_WIN
   // Windows HDR: DXGI-based renderer widget (native HDR via scRGB swap chain)
-  std::unique_ptr<video::HDR10WidgetWinDXGI> hdr10WidgetWin;
+  std::unique_ptr<video::NativeDXGIRenderer> dxgiRenderer;
 #endif
 
   // Freezing of the view

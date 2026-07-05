@@ -100,7 +100,7 @@ public:
   bool loadFrame(const VideoFrame &frame);
   bool hasFrame() const { return m_hasFrame; }
 
-  // View control (zoom and pan, same as HDR10Widget OpenGL)
+  // View control (zoom and pan, same as OpenGLRenderer OpenGL)
   void setZoom(double zoom);
   void setMoveOffset(QPointF offset);
 

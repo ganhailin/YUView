@@ -46,7 +46,7 @@
 #include <playlistitem/playlistItems.h>
 #include <ui/Mainwindow_performanceTestDialog.h>
 #include <ui/SettingsDialog.h>
-#include <ui/HDRSettingsDock.h>
+#include <ui/RendererSettingsDock.h>
 #include <ui/widgets/PlaylistTreeWidget.h>
 
 MainWindow::MainWindow(bool useAlternativeSources, QWidget *parent) : QMainWindow(parent)
@@ -169,9 +169,9 @@ MainWindow::MainWindow(bool useAlternativeSources, QWidget *parent) : QMainWindo
   ui.cachingInfoWidget->setPlaylistAndCache(ui.playlistTreeWidget, this->cache.get());
 
   // Connect HDR settings dock to split view
-  ui.hdrSettingsWidget->setSplitViewWidget(ui.displaySplitView);
-  connect(ui.displaySplitView, &splitViewWidget::hdrStatusChanged,
-          ui.hdrSettingsWidget, &HDRSettingsDock::setHDRInfo);
+  ui.rendererSettingsWidget->setSplitViewWidget(ui.displaySplitView);
+  connect(ui.displaySplitView, &splitViewWidget::rendererStatusChanged,
+          ui.rendererSettingsWidget, &RendererSettingsDock::setHDRInfo);
 
   separateViewWindow.splitView.setPlaybackController(ui.playbackController);
   separateViewWindow.splitView.setPlaylistTreeWidget(ui.playlistTreeWidget);
@@ -384,7 +384,7 @@ void MainWindow::createMenusAndActions()
   addDockViewAction(ui.cachingInfoDock, "Show Caching Info");
   viewMenu->addSeparator();
   addDockViewAction(ui.playbackControllerDock, "Show Playback &Controls", Qt::CTRL | Qt::Key_D);
-  addDockViewAction(ui.hdrSettingsDock, "Show &HDR / Color Settings", Qt::CTRL | Qt::Key_H);
+  addDockViewAction(ui.rendererSettingsDock, "Show &HDR / Color Settings", Qt::CTRL | Qt::Key_H);
 
   auto splitViewMenu = viewMenu->addMenu("Split View");
   ui.displaySplitView->addMenuActions(splitViewMenu);
@@ -971,7 +971,7 @@ void MainWindow::resetWindowLayout()
   ui.playbackControllerDock->setFloating(false);
   ui.fileInfoDock->setFloating(false);
   ui.cachingInfoDock->setFloating(false);
-  ui.hdrSettingsDock->setFloating(false);
+  ui.rendererSettingsDock->setFloating(false);
 
   // show the menu bar
   if (!is_Q_OS_MAC)
@@ -981,10 +981,10 @@ void MainWindow::resetWindowLayout()
   // Left side: Playlist, Info, then HDR/Color Settings + Caching Info tabbed together
   addDockWidget(Qt::LeftDockWidgetArea, ui.playlistDockWidget);
   splitDockWidget(ui.playlistDockWidget, ui.fileInfoDock, Qt::Vertical);
-  splitDockWidget(ui.fileInfoDock, ui.hdrSettingsDock, Qt::Vertical);
+  splitDockWidget(ui.fileInfoDock, ui.rendererSettingsDock, Qt::Vertical);
   addDockWidget(Qt::LeftDockWidgetArea, ui.cachingInfoDock);
-  tabifyDockWidget(ui.hdrSettingsDock, ui.cachingInfoDock);
-  ui.hdrSettingsDock->raise();
+  tabifyDockWidget(ui.rendererSettingsDock, ui.cachingInfoDock);
+  ui.rendererSettingsDock->raise();
 
   // Right side: Properties
   addDockWidget(Qt::RightDockWidgetArea, ui.propertiesDock);

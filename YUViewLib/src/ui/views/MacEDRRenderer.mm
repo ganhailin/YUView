@@ -199,7 +199,7 @@ bool MacEDRRenderer::initialize(QWindow *window)
   // signatures that break when the class is swapped, causing crashes like
   // "method signature argument cannot be nil" or "displayLayer: unrecognized selector".
   // Instead, mouse event forwarding is handled on the Qt side via event filters
-  // installed on the QWindow in HDR10WidgetMacEDR.cpp.
+  // installed on the QWindow in NativeEDRRenderer.cpp.
 
   // 检查显示器的 EDR 支持
   NSScreen *screen = view.window.screen;
@@ -322,10 +322,10 @@ void MacEDRRenderer::render()
   CAMetalLayer          *metalLayer   = (__bridge CAMetalLayer *)m_metalLayer;
   id<MTLRenderPipelineState> pipeline = (__bridge id<MTLRenderPipelineState>)m_pipelineStateVideo;
 
-  // ========== 计算顶点坐标 (与 HDR10Widget OpenGL paintGL 对齐) ==========
+  // ========== 计算顶点坐标 (与 OpenGLRenderer OpenGL paintGL 对齐) ==========
 
   // Calculate vertex positions that match SplitViewWidget's behavior
-  // Same logic as HDR10Widget::paintGL() for consistent zoom/pan behavior
+  // Same logic as OpenGLRenderer::paintGL() for consistent zoom/pan behavior
   int widgetW = m_width;
   int widgetH = m_height;
   int frameW = m_frameWidth;
@@ -352,7 +352,7 @@ void MacEDRRenderer::render()
   float bottom = static_cast<float>(ndcOffsetY - ndcH * 0.5);
   float top    = static_cast<float>(ndcOffsetY + ndcH * 0.5);
 
-  // Texture coords (flipped Y to fix upside-down, same as HDR10Widget)
+  // Texture coords (flipped Y to fix upside-down, same as OpenGLRenderer)
   VideoVertex vertices[] = {
       {{left,  bottom}, {0.0f, 1.0f}},  // Bottom-left
       {{right, bottom}, {1.0f, 1.0f}},  // Bottom-right

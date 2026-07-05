@@ -16,7 +16,7 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "HDRSettingsDock.h"
+#include "RendererSettingsDock.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -29,32 +29,32 @@
 
 #include <ui/views/SplitViewWidget.h>
 
-HDRSettingsDock::HDRSettingsDock(QWidget *parent)
+RendererSettingsDock::RendererSettingsDock(QWidget *parent)
   : QWidget(parent)
 {
   auto *mainLayout = new QVBoxLayout(this);
   mainLayout->setContentsMargins(4, 4, 4, 4);
   mainLayout->setSpacing(4);
 
-  // ── HDR Rendering section ────────────────────────────────────────
+  // ── Renderer section ────────────────────────────────────────
 
-  auto *labelHDRSection = new QLabel("HDR Rendering");
-  QFont boldFont = labelHDRSection->font();
+  auto *labelRendererSection = new QLabel("Renderer");
+  QFont boldFont = labelRendererSection->font();
   boldFont.setBold(true);
-  labelHDRSection->setFont(boldFont);
-  mainLayout->addWidget(labelHDRSection);
+  labelRendererSection->setFont(boldFont);
+  mainLayout->addWidget(labelRendererSection);
 
   // Rendering backend selection (combobox — no dependency between options)
   auto *labelRenderer = new QLabel("Renderer:");
   labelRenderer->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
   m_comboRenderingMode = new QComboBox();
-  m_comboRenderingMode->addItem("Disabled (QPainter)");       // index 0 (always)
-  m_comboRenderingMode->addItem("OpenGL (HDR10Widget)");      // index 1 (always)
+  m_comboRenderingMode->addItem("QPainter");                  // index 0 (Software, always)
+  m_comboRenderingMode->addItem("OpenGL");                    // index 1 (always)
 #ifdef Q_OS_WIN
-  m_comboRenderingMode->addItem("DXGI (Native HDR)");         // index 2 (Windows)
+  m_comboRenderingMode->addItem("NativeDXGI");                // index 2 (Windows)
 #endif
 #ifdef Q_OS_MAC
-  m_comboRenderingMode->addItem("EDR (Metal Renderer)");      // index 2 (macOS)
+  m_comboRenderingMode->addItem("NativeEDR");                 // index 2 (macOS)
 #endif
 
   // Disable the OpenGL option if OpenGL 3.3 Core is not supported.
@@ -72,21 +72,21 @@ HDRSettingsDock::HDRSettingsDock(QWidget *parent)
         if (item)
           item->setEnabled(false);
       }
-      m_comboRenderingMode->setItemText(1, "OpenGL (HDR10Widget) — not supported");
+      m_comboRenderingMode->setItemText(1, "OpenGL — not supported");
     }
   }
 
-  m_comboRenderingMode->setToolTip("Select HDR rendering backend.");
+  m_comboRenderingMode->setToolTip("Select renderer backend.");
   mainLayout->addWidget(labelRenderer);
   mainLayout->addWidget(m_comboRenderingMode);
 
   m_checkDithering = new QCheckBox("Dithering");
-  m_checkDithering->setToolTip("Enable Bayer dithering for HDR rendering to reduce banding on SDR displays.");
+  m_checkDithering->setToolTip("Enable Bayer dithering for renderer to reduce banding on SDR displays.");
   mainLayout->addWidget(m_checkDithering);
 
-  m_labelHDRInfo = new QLabel("HDR: --");
-  m_labelHDRInfo->setWordWrap(true);
-  mainLayout->addWidget(m_labelHDRInfo);
+  m_labelRendererInfo = new QLabel("HDR: --");
+  m_labelRendererInfo->setWordWrap(true);
+  mainLayout->addWidget(m_labelRendererInfo);
 
   // Separator
   auto *line1 = new QFrame();
@@ -172,32 +172,32 @@ HDRSettingsDock::HDRSettingsDock(QWidget *parent)
   // ── Connect signals ──────────────────────────────────────────────
 
   connect(m_comboEOTF, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &HDRSettingsDock::onEOTFChanged);
+          this, &RendererSettingsDock::onEOTFChanged);
   connect(m_comboEOTF, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &HDRSettingsDock::onAnySettingChanged);
+          this, &RendererSettingsDock::onAnySettingChanged);
   connect(m_comboGamut, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &HDRSettingsDock::onAnySettingChanged);
+          this, &RendererSettingsDock::onAnySettingChanged);
   connect(m_spinGamma, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-          this, &HDRSettingsDock::onAnySettingChanged);
+          this, &RendererSettingsDock::onAnySettingChanged);
   connect(m_spinDiffuseWhite, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-          this, &HDRSettingsDock::onAnySettingChanged);
+          this, &RendererSettingsDock::onAnySettingChanged);
   connect(m_spinBrightness, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-          this, &HDRSettingsDock::onAnySettingChanged);
+          this, &RendererSettingsDock::onAnySettingChanged);
   connect(m_comboRenderingMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &HDRSettingsDock::onRenderingModeChanged);
-  connect(m_checkDithering, &QCheckBox::toggled, this, &HDRSettingsDock::onAnySettingChanged);
+          this, &RendererSettingsDock::onRenderingModeChanged);
+  connect(m_checkDithering, &QCheckBox::toggled, this, &RendererSettingsDock::onAnySettingChanged);
 
   onEOTFChanged(m_comboEOTF->currentIndex());
 }
 
-HDRSettingsDock::~HDRSettingsDock() = default;
+RendererSettingsDock::~RendererSettingsDock() = default;
 
-void HDRSettingsDock::setSplitViewWidget(splitViewWidget *splitView)
+void RendererSettingsDock::setSplitViewWidget(splitViewWidget *splitView)
 {
   m_splitView = splitView;
 }
 
-void HDRSettingsDock::loadSettings()
+void RendererSettingsDock::loadSettings()
 {
   QSettings settings;
   m_comboEOTF->setCurrentIndex(settings.value("View/EDR_EOTF", 3).toInt());
@@ -242,7 +242,7 @@ void HDRSettingsDock::loadSettings()
   updateDitheringState();
 }
 
-void HDRSettingsDock::applySettings()
+void RendererSettingsDock::applySettings()
 {
   if (!m_splitView)
     return;
@@ -260,25 +260,25 @@ void HDRSettingsDock::applySettings()
   m_splitView->updateSettings();
 }
 
-void HDRSettingsDock::onEOTFChanged(int index)
+void RendererSettingsDock::onEOTFChanged(int index)
 {
   bool gammaEnabled = (index == 2);
   m_spinGamma->setEnabled(gammaEnabled);
   m_labelGamma->setEnabled(gammaEnabled);
 }
 
-void HDRSettingsDock::onRenderingModeChanged(int)
+void RendererSettingsDock::onRenderingModeChanged(int)
 {
   updateDitheringState();
   applySettings();
 }
 
-void HDRSettingsDock::onAnySettingChanged()
+void RendererSettingsDock::onAnySettingChanged()
 {
   applySettings();
 }
 
-void HDRSettingsDock::setHDRInfo(bool hdrActive, bool systemHandlesTonemapping,
+void RendererSettingsDock::setHDRInfo(bool hdrActive, bool systemHandlesTonemapping,
                                  float maxNits, float sdrWhiteNits)
 {
   QString info;
@@ -296,40 +296,40 @@ void HDRSettingsDock::setHDRInfo(bool hdrActive, bool systemHandlesTonemapping,
   }
   else
     info = "SDR (no ACM) | App tonemapping";
-  m_labelHDRInfo->setText(info);
+  m_labelRendererInfo->setText(info);
 }
 
-video::HDR10_EOTF HDRSettingsDock::eotf() const
+video::RendererEOTF RendererSettingsDock::eotf() const
 {
-  return static_cast<video::HDR10_EOTF>(m_comboEOTF->currentIndex());
+  return static_cast<video::RendererEOTF>(m_comboEOTF->currentIndex());
 }
 
-video::HDR10_ColorGamut HDRSettingsDock::colorGamut() const
+video::RendererColorGamut RendererSettingsDock::colorGamut() const
 {
-  return static_cast<video::HDR10_ColorGamut>(m_comboGamut->currentIndex());
+  return static_cast<video::RendererColorGamut>(m_comboGamut->currentIndex());
 }
 
-float HDRSettingsDock::gammaValue() const
+float RendererSettingsDock::gammaValue() const
 {
   return static_cast<float>(m_spinGamma->value());
 }
 
-float HDRSettingsDock::diffuseWhiteNits() const
+float RendererSettingsDock::diffuseWhiteNits() const
 {
   return static_cast<float>(m_spinDiffuseWhite->value());
 }
 
-float HDRSettingsDock::hdrBrightness() const
+float RendererSettingsDock::hdrBrightness() const
 {
   return static_cast<float>(m_spinBrightness->value());
 }
 
-bool HDRSettingsDock::ditheringEnabled() const
+bool RendererSettingsDock::ditheringEnabled() const
 {
   return m_checkDithering->isChecked();
 }
 
-void HDRSettingsDock::updateDitheringState()
+void RendererSettingsDock::updateDitheringState()
 {
   // Dithering is only useful for the OpenGL path (8-bit FBO on macOS).
   // DXGI uses FP16 scRGB (no banding), EDR uses Metal's native HDR.

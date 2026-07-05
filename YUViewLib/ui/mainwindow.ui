@@ -262,14 +262,14 @@
    </attribute>
    <widget class="VideoCacheInfoWidget" name="cachingInfoWidget"/>
   </widget>
-  <widget class="QDockWidget" name="hdrSettingsDock">
+  <widget class="QDockWidget" name="rendererSettingsDock">
    <property name="windowTitle">
     <string>HDR / Color Settings</string>
    </property>
    <attribute name="dockWidgetArea">
     <number>1</number>
    </attribute>
-   <widget class="HDRSettingsDock" name="hdrSettingsWidget"/>
+   <widget class="RendererSettingsDock" name="rendererSettingsWidget"/>
   </widget>
   <action name="actionOpen">
    <property name="text">
@@ -321,9 +321,9 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>HDRSettingsDock</class>
+   <class>RendererSettingsDock</class>
    <extends>QWidget</extends>
-   <header>ui/HDRSettingsDock.h</header>
+   <header>ui/RendererSettingsDock.h</header>
   </customwidget>
  </customwidgets>
  <tabstops>

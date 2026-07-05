@@ -56,7 +56,7 @@
 #include <vector>
 
 #include <video/VideoFrame.h>
-#include <ui/views/HDR10Widget.h>  // For HDR10_EOTF, HDR10_ColorGamut enums
+#include <ui/views/OpenGLRenderer.h>  // For RendererEOTF, RendererColorGamut enums
 
 using Microsoft::WRL::ComPtr;
 
@@ -70,7 +70,7 @@ namespace video
  * @brief Windows DXGI HDR 渲染 Widget
  *
  * 使用 DXGI swap chain + D3D11 实现 Windows 原生 HDR 显示。
- * 参考 HDR10WidgetMacEDR 的设计模式，作为 Windows 平台的 HDR 渲染后端。
+ * 参考 NativeEDRRenderer 的设计模式，作为 Windows 平台的 HDR 渲染后端。
  *
  * 架构：
  * - 继承 QWidget，通过 WA_NativeWindow 获取原生 HWND
@@ -79,15 +79,15 @@ namespace video
  * - 支持 PQ/HLG/Gamma/sRGB EOTF 和 BT.2020/BT.709/P3 色域转换
  * - 支持 16-bit 纹理上传和 HDR 亮度控制
  */
-class HDR10WidgetWinDXGI : public QWidget
+class NativeDXGIRenderer : public QWidget
 {
   Q_OBJECT
 
 public:
-  explicit HDR10WidgetWinDXGI(QWidget *parent = nullptr);
-  ~HDR10WidgetWinDXGI() override;
+  explicit NativeDXGIRenderer(QWidget *parent = nullptr);
+  ~NativeDXGIRenderer() override;
 
-  // ── 数据设置 (与 HDR10Widget 接口一致) ──
+  // ── 数据设置 (与 OpenGLRenderer 接口一致) ──
   void setFrame(const VideoFrame &frame);
   void setFrameHandler(FrameHandler *handler) { m_frameHandler = handler; }
   void setBitDepth(int bits) { m_bitDepth = bits; }
@@ -96,9 +96,9 @@ public:
   void setMoveOffset(QPointF offset);
   void setShowRawData(bool show) { m_showRawData = show; }
 
-  // ── EOTF 和色域控制 (与 HDR10Widget 接口一致) ──
-  void setEOTF(HDR10_EOTF eotf) { m_eotf = eotf; m_frameNeedsUpdate = true; update(); }
-  void setColorGamut(HDR10_ColorGamut gamut) { m_colorGamut = gamut; m_frameNeedsUpdate = true; update(); }
+  // ── EOTF 和色域控制 (与 OpenGLRenderer 接口一致) ──
+  void setEOTF(RendererEOTF eotf) { m_eotf = eotf; m_frameNeedsUpdate = true; update(); }
+  void setColorGamut(RendererColorGamut gamut) { m_colorGamut = gamut; m_frameNeedsUpdate = true; update(); }
   void setGammaValue(float gamma) { m_gammaValue = gamma; m_frameNeedsUpdate = true; update(); }
   void setDiffuseWhiteNits(float nits) { m_diffuseWhiteNits = nits; m_frameNeedsUpdate = true; update(); }
   void setHDRBrightness(float brightness) { m_hdrBrightness = brightness; m_frameNeedsUpdate = true; update(); }
@@ -115,7 +115,7 @@ public:
   void drawPixelRulers(QPainter *painter);
 
 signals:
-  void hdrStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
+  void rendererStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
                         float maxNits, float sdrWhiteNits);
 
 protected:
@@ -172,8 +172,8 @@ private:
   bool m_showRawData{false};
 
   // ── EDR 色彩处理参数 ──
-  HDR10_EOTF       m_eotf{HDR10_EOTF::SRGB};
-  HDR10_ColorGamut m_colorGamut{HDR10_ColorGamut::BT709};
+  RendererEOTF       m_eotf{RendererEOTF::SRGB};
+  RendererColorGamut m_colorGamut{RendererColorGamut::BT709};
   float            m_gammaValue{2.2f};
   float            m_diffuseWhiteNits{203.0f};
   float            m_hdrBrightness{1.0f};

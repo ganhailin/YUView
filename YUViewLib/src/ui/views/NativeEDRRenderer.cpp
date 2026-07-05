@@ -21,7 +21,7 @@
 
 #ifdef Q_OS_MAC
 
-#include "HDR10WidgetMacEDR.h"
+#include "NativeEDRRenderer.h"
 #include "MacEDRRenderer.h"
 
 #include <video/FrameHandler.h>
@@ -39,14 +39,14 @@
 namespace video
 {
 
-// Threshold for showing pixel values (same as HDR10Widget)
+// Threshold for showing pixel values (same as OpenGLRenderer)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
 
 // ========== PixelOverlayWidget ==========
 
-// ========== HDR10WidgetMacEDR ==========
+// ========== NativeEDRRenderer ==========
 
-HDR10WidgetMacEDR::HDR10WidgetMacEDR(QWidget *parent) : QWidget(parent)
+NativeEDRRenderer::NativeEDRRenderer(QWidget *parent) : QWidget(parent)
 {
   // NOTE: Do NOT use WA_PaintOnScreen here. When this widget is a child of
   // SplitViewWidget (which has its own backing store and paintEvent), WA_PaintOnScreen
@@ -89,19 +89,19 @@ HDR10WidgetMacEDR::HDR10WidgetMacEDR(QWidget *parent) : QWidget(parent)
   // crashes. The overlay image is drawn via QPainter→QImage→CGImage→CALayer.
 }
 
-HDR10WidgetMacEDR::~HDR10WidgetMacEDR()
+NativeEDRRenderer::~NativeEDRRenderer()
 {
   m_renderer.reset();
 }
 
-bool HDR10WidgetMacEDR::initializeRenderer()
+bool NativeEDRRenderer::initializeRenderer()
 {
   if (m_initialized)
     return true;
 
   if (!m_containerWindow)
   {
-    qWarning() << "HDR10WidgetMacEDR: container window not created";
+    qWarning() << "NativeEDRRenderer: container window not created";
     return false;
   }
 
@@ -110,7 +110,7 @@ bool HDR10WidgetMacEDR::initializeRenderer()
 
   if (!m_renderer->initialize(m_containerWindow))
   {
-    qWarning() << "HDR10WidgetMacEDR: failed to initialize Metal renderer";
+    qWarning() << "NativeEDRRenderer: failed to initialize Metal renderer";
     m_renderer.reset();
     return false;
   }
@@ -137,12 +137,12 @@ bool HDR10WidgetMacEDR::initializeRenderer()
                        .arg(m_edrSupported ? "supported" : "not supported")
                        .arg(m_maxEDRValue);
 
-  qInfo() << "HDR10WidgetMacEDR:" << m_rendererInfo;
+  qInfo() << "NativeEDRRenderer:" << m_rendererInfo;
 
   return true;
 }
 
-void HDR10WidgetMacEDR::setFrame(const VideoFrame &frame)
+void NativeEDRRenderer::setFrame(const VideoFrame &frame)
 {
   const uint16_t *newData = frame.getData16bit();
   const uint16_t *oldData =
@@ -172,31 +172,31 @@ void HDR10WidgetMacEDR::setFrame(const VideoFrame &frame)
   }
 }
 
-void HDR10WidgetMacEDR::setFrameHandler(FrameHandler *handler)
+void NativeEDRRenderer::setFrameHandler(FrameHandler *handler)
 {
   m_frameHandler = handler;
 }
 
-void HDR10WidgetMacEDR::setBitDepth(int bits)
+void NativeEDRRenderer::setBitDepth(int bits)
 {
   m_bitDepth = bits;
 }
 
-void HDR10WidgetMacEDR::setDithering(bool enable)
+void NativeEDRRenderer::setDithering(bool enable)
 {
   m_ditheringEnabled = enable;
   // Dithering is handled in shader - no immediate effect in EDR mode
   // (EDR displays can show the full range without dithering)
 }
 
-void HDR10WidgetMacEDR::setShowRawData(bool show)
+void NativeEDRRenderer::setShowRawData(bool show)
 {
   if (m_showRawData == show) return;
   m_showRawData = show;
   updatePixelOverlay();
 }
 
-void HDR10WidgetMacEDR::setZoom(double zoom)
+void NativeEDRRenderer::setZoom(double zoom)
 {
   m_zoom = zoom;
   if (m_renderer)
@@ -204,7 +204,7 @@ void HDR10WidgetMacEDR::setZoom(double zoom)
   updatePixelOverlay();
 }
 
-void HDR10WidgetMacEDR::setMoveOffset(QPointF offset)
+void NativeEDRRenderer::setMoveOffset(QPointF offset)
 {
   m_moveOffset = offset;
   if (m_renderer)
@@ -212,7 +212,7 @@ void HDR10WidgetMacEDR::setMoveOffset(QPointF offset)
   updatePixelOverlay();
 }
 
-void HDR10WidgetMacEDR::setEOTF(color::EOTF eotf)
+void NativeEDRRenderer::setEOTF(color::EOTF eotf)
 {
   m_eotf = eotf;
   if (m_renderer)
@@ -222,7 +222,7 @@ void HDR10WidgetMacEDR::setEOTF(color::EOTF eotf)
   }
 }
 
-void HDR10WidgetMacEDR::setColorGamut(color::ColorGamut gamut)
+void NativeEDRRenderer::setColorGamut(color::ColorGamut gamut)
 {
   m_colorGamut = gamut;
   if (m_renderer)
@@ -232,7 +232,7 @@ void HDR10WidgetMacEDR::setColorGamut(color::ColorGamut gamut)
   }
 }
 
-void HDR10WidgetMacEDR::setGammaValue(float gamma)
+void NativeEDRRenderer::setGammaValue(float gamma)
 {
   m_gammaValue = gamma;
   if (m_renderer)
@@ -242,7 +242,7 @@ void HDR10WidgetMacEDR::setGammaValue(float gamma)
   }
 }
 
-void HDR10WidgetMacEDR::setDiffuseWhiteNits(float nits)
+void NativeEDRRenderer::setDiffuseWhiteNits(float nits)
 {
   m_diffuseWhiteNits = nits;
   if (m_renderer)
@@ -252,7 +252,7 @@ void HDR10WidgetMacEDR::setDiffuseWhiteNits(float nits)
   }
 }
 
-void HDR10WidgetMacEDR::setHDRBrightness(float brightness)
+void NativeEDRRenderer::setHDRBrightness(float brightness)
 {
   m_hdrBrightness = brightness;
   if (m_renderer)
@@ -262,7 +262,7 @@ void HDR10WidgetMacEDR::setHDRBrightness(float brightness)
   }
 }
 
-void HDR10WidgetMacEDR::setPremultipliedAlpha(bool enabled)
+void NativeEDRRenderer::setPremultipliedAlpha(bool enabled)
 {
   m_premultipliedAlpha = enabled;
   if (m_renderer)
@@ -272,22 +272,22 @@ void HDR10WidgetMacEDR::setPremultipliedAlpha(bool enabled)
   }
 }
 
-bool HDR10WidgetMacEDR::isEDRSupported() const
+bool NativeEDRRenderer::isEDRSupported() const
 {
   return m_edrSupported;
 }
 
-float HDR10WidgetMacEDR::getMaxEDRValue() const
+float NativeEDRRenderer::getMaxEDRValue() const
 {
   return m_maxEDRValue;
 }
 
-QString HDR10WidgetMacEDR::getRendererInfo() const
+QString NativeEDRRenderer::getRendererInfo() const
 {
   return m_rendererInfo;
 }
 
-void HDR10WidgetMacEDR::updatePixelOverlay()
+void NativeEDRRenderer::updatePixelOverlay()
 {
   // Render pixel values/zoom/rulers into a QImage, then set it as the
   // overlay CALayer's contents (above the Metal layer in the NSView hierarchy).
@@ -313,7 +313,7 @@ void HDR10WidgetMacEDR::updatePixelOverlay()
   m_renderer->setOverlayImage(overlayImage);
 }
 
-void HDR10WidgetMacEDR::resizeEvent(QResizeEvent *event)
+void NativeEDRRenderer::resizeEvent(QResizeEvent *event)
 {
   QWidget::resizeEvent(event);
 
@@ -328,7 +328,7 @@ void HDR10WidgetMacEDR::resizeEvent(QResizeEvent *event)
   updatePixelOverlay();
 }
 
-void HDR10WidgetMacEDR::paintEvent(QPaintEvent *event)
+void NativeEDRRenderer::paintEvent(QPaintEvent *event)
 {
   Q_UNUSED(event)
 
@@ -341,7 +341,7 @@ void HDR10WidgetMacEDR::paintEvent(QPaintEvent *event)
     m_renderer->render();
 }
 
-void HDR10WidgetMacEDR::showEvent(QShowEvent *event)
+void NativeEDRRenderer::showEvent(QShowEvent *event)
 {
   QWidget::showEvent(event);
 
@@ -354,7 +354,7 @@ void HDR10WidgetMacEDR::showEvent(QShowEvent *event)
     m_renderer->render();
 }
 
-bool HDR10WidgetMacEDR::eventFilter(QObject *watched, QEvent *event)
+bool NativeEDRRenderer::eventFilter(QObject *watched, QEvent *event)
 {
   // Forward mouse and wheel events from the Metal QWindow to the parent
   // SplitViewWidget so that drag/zoom interactions work correctly.
@@ -413,9 +413,9 @@ bool HDR10WidgetMacEDR::eventFilter(QObject *watched, QEvent *event)
   return QWidget::eventFilter(watched, event);
 }
 
-// ========== Pixel value drawing (reused from HDR10Widget logic) ==========
+// ========== Pixel value drawing (reused from OpenGLRenderer logic) ==========
 
-void HDR10WidgetMacEDR::drawPixelValues(QPainter *painter)
+void NativeEDRRenderer::drawPixelValues(QPainter *painter)
 {
   if (!m_showRawData || m_zoom < SHOW_PIXEL_VALUES_ZOOM_THRESHOLD)
     return;
@@ -560,7 +560,7 @@ void HDR10WidgetMacEDR::drawPixelValues(QPainter *painter)
   }
 }
 
-void HDR10WidgetMacEDR::drawZoomIndicator(QPainter *painter)
+void NativeEDRRenderer::drawZoomIndicator(QPainter *painter)
 {
   if (m_zoom == 1.0)
     return;
@@ -576,7 +576,7 @@ void HDR10WidgetMacEDR::drawZoomIndicator(QPainter *painter)
   painter->drawText(pos, zoomString);
 }
 
-void HDR10WidgetMacEDR::drawPixelRulers(QPainter *painter)
+void NativeEDRRenderer::drawPixelRulers(QPainter *painter)
 {
   if (!m_frameHandler || m_zoom < 32.0)
     return;

@@ -29,7 +29,7 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "HDR10WidgetWinDXGI.h"
+#include "NativeDXGIRenderer.h"
 
 #ifdef Q_OS_WIN
 
@@ -88,7 +88,7 @@ VS_OUTPUT main(VS_INPUT input)
 
 /** HDR pixel shader with EOTF and color gamut conversion
  *
- *  Ported from hdr10_fragment_edr.glsl.
+ *  Ported from opengl_fragment.glsl.
  *  Input:  16-bit RGBA texture (DXGI_FORMAT_R16G16B16A16_UNORM → sampled as float4 0..1)
  *  Output: scRGB linear values (can be >1.0 for HDR)
  */
@@ -98,7 +98,7 @@ SamplerState texSampler : register(s0);
 
 cbuffer Constants : register(b0)
 {
-    int   eotf;                    // HDR10_EOTF enum: 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
+    int   eotf;                    // RendererEOTF enum: 0=PQ, 1=HLG, 2=Gamma, 3=sRGB
     float gammaValue;              // Gamma exponent (only when eotf=2)
     float diffuseWhiteNits;        // Diffuse white reference (nits) from user settings
     float hdrBrightness;           // HDR brightness multiplier
@@ -365,9 +365,9 @@ struct ViewConstantBuffer
   float zoomScaleY;
 };
 
-// ─── HDR10WidgetWinDXGI implementation ────────────────────────────
+// ─── NativeDXGIRenderer implementation ────────────────────────────
 
-HDR10WidgetWinDXGI::HDR10WidgetWinDXGI(QWidget *parent)
+NativeDXGIRenderer::NativeDXGIRenderer(QWidget *parent)
   : QWidget(parent)
 {
   setAttribute(Qt::WA_NativeWindow);
@@ -395,14 +395,14 @@ HDR10WidgetWinDXGI::HDR10WidgetWinDXGI(QWidget *parent)
   m_debugOutput = 0.0f;
 }
 
-HDR10WidgetWinDXGI::~HDR10WidgetWinDXGI()
+NativeDXGIRenderer::~NativeDXGIRenderer()
 {
   m_renderTimer->stop();
   if (m_hdrPollTimer)
     m_hdrPollTimer->stop();
 }
 
-void HDR10WidgetWinDXGI::setFrame(const VideoFrame &frame)
+void NativeDXGIRenderer::setFrame(const VideoFrame &frame)
 {
   const uint16_t *newData = frame.getData16bit();
   const uint16_t *oldData =
@@ -422,7 +422,7 @@ void HDR10WidgetWinDXGI::setFrame(const VideoFrame &frame)
   }
 }
 
-void HDR10WidgetWinDXGI::setZoom(double zoom)
+void NativeDXGIRenderer::setZoom(double zoom)
 {
   if (m_zoom != zoom)
   {
@@ -432,20 +432,20 @@ void HDR10WidgetWinDXGI::setZoom(double zoom)
   }
 }
 
-void HDR10WidgetWinDXGI::setMoveOffset(QPointF offset)
+void NativeDXGIRenderer::setMoveOffset(QPointF offset)
 {
   m_moveOffset = offset;
   m_frameNeedsUpdate = true;
 }
 
-bool HDR10WidgetWinDXGI::isHDRActive() const
+bool NativeDXGIRenderer::isHDRActive() const
 {
   if (m_swapChain)
     return m_swapChain->isHDRActive();
   return false;
 }
 
-void HDR10WidgetWinDXGI::resizeEvent(QResizeEvent *event)
+void NativeDXGIRenderer::resizeEvent(QResizeEvent *event)
 {
   QWidget::resizeEvent(event);
   if (m_swapChain)
@@ -456,7 +456,7 @@ void HDR10WidgetWinDXGI::resizeEvent(QResizeEvent *event)
   }
 }
 
-void HDR10WidgetWinDXGI::paintEvent(QPaintEvent *)
+void NativeDXGIRenderer::paintEvent(QPaintEvent *)
 {
   if (!m_initialized && !m_initFailed)
   {
@@ -473,7 +473,7 @@ void HDR10WidgetWinDXGI::paintEvent(QPaintEvent *)
   // Overlay is drawn via D3D texture blend in render(), not via QPainter
 }
 
-void HDR10WidgetWinDXGI::showEvent(QShowEvent *event)
+void NativeDXGIRenderer::showEvent(QShowEvent *event)
 {
   QWidget::showEvent(event);
   if (!m_initialized && !m_initFailed)
@@ -489,7 +489,7 @@ void HDR10WidgetWinDXGI::showEvent(QShowEvent *event)
     m_hdrPollTimer->start(2000);
 }
 
-void HDR10WidgetWinDXGI::hideEvent(QHideEvent *event)
+void NativeDXGIRenderer::hideEvent(QHideEvent *event)
 {
   QWidget::hideEvent(event);
 
@@ -500,12 +500,12 @@ void HDR10WidgetWinDXGI::hideEvent(QHideEvent *event)
   m_frameNeedsUpdate = false;
 }
 
-void HDR10WidgetWinDXGI::initD3D()
+void NativeDXGIRenderer::initD3D()
 {
   HWND hwnd = reinterpret_cast<HWND>(winId());
   if (!hwnd)
   {
-    qWarning() << "[HDR10WidgetWinDXGI] No native window handle";
+    qWarning() << "[NativeDXGIRenderer] No native window handle";
     m_initFailed = true;
     return;
   }
@@ -515,7 +515,7 @@ void HDR10WidgetWinDXGI::initD3D()
   int physH = static_cast<int>(height() * devicePixelRatio());
   if (!m_swapChain->initialize(hwnd, physW, physH))
   {
-    qCritical() << "[HDR10WidgetWinDXGI] Failed to initialize DXGI swap chain";
+    qCritical() << "[NativeDXGIRenderer] Failed to initialize DXGI swap chain";
     m_initFailed = true;
     return;
   }
@@ -531,7 +531,7 @@ void HDR10WidgetWinDXGI::initD3D()
     "vs", nullptr, nullptr, "main", "vs_4_0", 0, 0, &vsBlob, &errorBlob);
   if (FAILED(hr))
   {
-    qCritical() << "[HDR10WidgetWinDXGI] VS compile error:"
+    qCritical() << "[NativeDXGIRenderer] VS compile error:"
                 << (char *)errorBlob->GetBufferPointer();
     m_initFailed = true;
     return;
@@ -543,7 +543,7 @@ void HDR10WidgetWinDXGI::initD3D()
     "ps", nullptr, nullptr, "main", "ps_4_0", 0, 0, &psBlob, &errorBlob);
   if (FAILED(hr))
   {
-    qCritical() << "[HDR10WidgetWinDXGI] PS compile error:"
+    qCritical() << "[NativeDXGIRenderer] PS compile error:"
                 << (char *)errorBlob->GetBufferPointer();
     m_initFailed = true;
     return;
@@ -557,7 +557,7 @@ void HDR10WidgetWinDXGI::initD3D()
     "ps", nullptr, nullptr, "main", "ps_4_0", 0, 0, &psBlob, &errorBlob);
   if (FAILED(hr))
   {
-    qCritical() << "[HDR10WidgetWinDXGI] Overlay PS compile error:"
+    qCritical() << "[NativeDXGIRenderer] Overlay PS compile error:"
                 << (char *)errorBlob->GetBufferPointer();
     m_initFailed = true;
     return;
@@ -647,14 +647,14 @@ void HDR10WidgetWinDXGI::initD3D()
     .arg(caps.hdrActive ? caps.maxLuminance : 80.0f, 0, 'f', 0);
 
   m_initialized = true;
-  qInfo() << "[HDR10WidgetWinDXGI] initD3D complete:" << m_rendererInfo;
+  qInfo() << "[NativeDXGIRenderer] initD3D complete:" << m_rendererInfo;
 }
 
-void HDR10WidgetWinDXGI::updateTexture()
+void NativeDXGIRenderer::updateTexture()
 {
   if (!m_initialized || !m_swapChain)
   {
-    qWarning() << "[HDR10WidgetWinDXGI] updateTexture: not initialized";
+    qWarning() << "[NativeDXGIRenderer] updateTexture: not initialized";
     return;
   }
 
@@ -664,7 +664,7 @@ void HDR10WidgetWinDXGI::updateTexture()
   // Get 16-bit data from VideoFrame
   if (!m_currentFrame.getData16bit())
   {
-    qWarning() << "[HDR10WidgetWinDXGI] updateTexture: no 16-bit data, trying to generate from 8-bit";
+    qWarning() << "[NativeDXGIRenderer] updateTexture: no 16-bit data, trying to generate from 8-bit";
     // No 16-bit data available, try to generate from 8-bit
     const_cast<VideoFrame &>(m_currentFrame).generate16bitBuffer();
     m_sourceBitDepth = 8;
@@ -677,7 +677,7 @@ void HDR10WidgetWinDXGI::updateTexture()
   const uint16_t *data = m_currentFrame.getData16bit();
   if (!data)
   {
-    qWarning() << "[HDR10WidgetWinDXGI] updateTexture: no data after generation";
+    qWarning() << "[NativeDXGIRenderer] updateTexture: no data after generation";
     return;
   }
 
@@ -685,7 +685,7 @@ void HDR10WidgetWinDXGI::updateTexture()
   int h = m_frameSize.height();
   if (w <= 0 || h <= 0)
   {
-    qWarning() << "[HDR10WidgetWinDXGI] updateTexture: invalid frame size" << w << "x" << h;
+    qWarning() << "[NativeDXGIRenderer] updateTexture: invalid frame size" << w << "x" << h;
     return;
   }
 
@@ -715,7 +715,7 @@ void HDR10WidgetWinDXGI::updateTexture()
     HRESULT hr = device->CreateTexture2D(&texDesc, &texData, &m_texture);
     if (FAILED(hr))
     {
-      qWarning() << "[HDR10WidgetWinDXGI] CreateTexture2D failed:" << Qt::hex << hr;
+      qWarning() << "[NativeDXGIRenderer] CreateTexture2D failed:" << Qt::hex << hr;
       return;
     }
     // Shader resource view
@@ -728,7 +728,7 @@ void HDR10WidgetWinDXGI::updateTexture()
     hr = device->CreateShaderResourceView(m_texture.Get(), &srvDesc, &m_textureSRV);
     if (FAILED(hr))
     {
-      qWarning() << "[HDR10WidgetWinDXGI] CreateShaderResourceView failed:" << Qt::hex << hr;
+      qWarning() << "[NativeDXGIRenderer] CreateShaderResourceView failed:" << Qt::hex << hr;
       return;
     }
 
@@ -743,14 +743,14 @@ void HDR10WidgetWinDXGI::updateTexture()
   m_textureNeedsUpdate = false;
 }
 
-void HDR10WidgetWinDXGI::render()
+void NativeDXGIRenderer::render()
 {
   if (!isVisible())
     return;
 
   if (!m_initialized || !m_swapChain)
   {
-    qWarning() << "[HDR10WidgetWinDXGI] render: not initialized";
+    qWarning() << "[NativeDXGIRenderer] render: not initialized";
     return;
   }
 
@@ -760,7 +760,7 @@ void HDR10WidgetWinDXGI::render()
 
   if (!m_textureSRV)
   {
-    qWarning() << "[HDR10WidgetWinDXGI] render: no texture SRV";
+    qWarning() << "[NativeDXGIRenderer] render: no texture SRV";
     return;
   }
 
@@ -780,7 +780,7 @@ void HDR10WidgetWinDXGI::render()
   //   1. The system is NOT handling tonemapping (SDR without ACM), AND
   //   2. The content is HDR (PQ/HLG) — linear light may exceed 1.0 and needs compression.
   // SDR content (sRGB/Gamma) has linear values already in 0-1 range, so skip Reinhard.
-  bool isHDREOTF = (m_eotf == video::HDR10_EOTF::PQ || m_eotf == video::HDR10_EOTF::HLG);
+  bool isHDREOTF = (m_eotf == video::RendererEOTF::PQ || m_eotf == video::RendererEOTF::HLG);
   cb.systemHandlesTonemapping = (caps.systemHandlesTonemapping || !isHDREOTF) ? 1.0f : 0.0f;
   cb.debugOutput              = m_debugOutput;
   cb.premultipliedAlpha       = m_premultipliedAlpha ? 1 : 0;
@@ -818,7 +818,7 @@ void HDR10WidgetWinDXGI::render()
   }
 
   // ── Update view constant buffer (register b1) ────────────────────
-  // Compute zoom and pan in NDC space, matching OpenGL HDR10Widget behavior
+  // Compute zoom and pan in NDC space, matching OpenGL OpenGLRenderer behavior
   // m_zoom and m_moveOffset are in logical pixels from SplitViewWidget,
   // but swap chain is in physical pixels. Scale to match.
 
@@ -907,11 +907,11 @@ void HDR10WidgetWinDXGI::render()
   m_frameNeedsUpdate = false;
 }
 
-// ========== Pixel value / zoom / ruler drawing (from HDR10WidgetMacEDR) ==========
+// ========== Pixel value / zoom / ruler drawing (from NativeEDRRenderer) ==========
 
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
 
-void HDR10WidgetWinDXGI::drawPixelValues(QPainter *painter)
+void NativeDXGIRenderer::drawPixelValues(QPainter *painter)
 {
   if (!m_showRawData || m_zoom < SHOW_PIXEL_VALUES_ZOOM_THRESHOLD)
     return;
@@ -1056,7 +1056,7 @@ void HDR10WidgetWinDXGI::drawPixelValues(QPainter *painter)
   }
 }
 
-void HDR10WidgetWinDXGI::drawZoomIndicator(QPainter *painter)
+void NativeDXGIRenderer::drawZoomIndicator(QPainter *painter)
 {
   if (m_zoom == 1.0)
     return;
@@ -1072,7 +1072,7 @@ void HDR10WidgetWinDXGI::drawZoomIndicator(QPainter *painter)
   painter->drawText(pos, zoomString);
 }
 
-void HDR10WidgetWinDXGI::drawPixelRulers(QPainter *painter)
+void NativeDXGIRenderer::drawPixelRulers(QPainter *painter)
 {
   if (!m_frameHandler || m_zoom < 32.0)
     return;
@@ -1147,7 +1147,7 @@ void HDR10WidgetWinDXGI::drawPixelRulers(QPainter *painter)
   }
 }
 
-void HDR10WidgetWinDXGI::drawOverlayTexture(ID3D11DeviceContext *ctx, int w, int h)
+void NativeDXGIRenderer::drawOverlayTexture(ID3D11DeviceContext *ctx, int w, int h)
 {
   // w, h are physical pixels (swap chain size)
   // drawPixelValues/drawZoomIndicator/drawPixelRulers use width()/height()
@@ -1254,7 +1254,7 @@ void HDR10WidgetWinDXGI::drawOverlayTexture(ID3D11DeviceContext *ctx, int w, int
   ctx->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
 }
 
-void HDR10WidgetWinDXGI::updateHDRStatus()
+void NativeDXGIRenderer::updateHDRStatus()
 {
   if (!m_swapChain)
     return;
@@ -1268,13 +1268,13 @@ void HDR10WidgetWinDXGI::updateHDRStatus()
   m_lastHdrActive = caps.hdrActive;
   m_lastSystemTonemapping = caps.systemHandlesTonemapping;
 
-  qInfo() << "[HDR10WidgetWinDXGI] HDR:" << caps.hdrActive
+  qInfo() << "[NativeDXGIRenderer] HDR:" << caps.hdrActive
           << "ACM:" << caps.acmActive
           << "systemTonemap:" << caps.systemHandlesTonemapping
           << "maxNits:" << caps.maxLuminance
           << "sdrWhite:" << caps.sdrWhiteNits;
 
-  emit hdrStatusChanged(caps.hdrActive, caps.systemHandlesTonemapping,
+  emit rendererStatusChanged(caps.hdrActive, caps.systemHandlesTonemapping,
                         caps.maxLuminance, caps.sdrWhiteNits);
 
   // Force re-render with updated tonemapping state
@@ -1282,7 +1282,7 @@ void HDR10WidgetWinDXGI::updateHDRStatus()
   update();
 }
 
-bool HDR10WidgetWinDXGI::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
+bool NativeDXGIRenderer::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
 {
   if (eventType == "windows_generic_MSG" || eventType == "windows_dispatcher_MSG")
   {
@@ -1293,7 +1293,7 @@ bool HDR10WidgetWinDXGI::nativeEvent(const QByteArray &eventType, void *message,
       // display mode change). It does NOT fire on ACM toggle or HDR on/off —
       // those are handled by the 2-second poll timer.
       // On receipt, trigger an immediate refresh instead of waiting for the next poll.
-      qInfo() << "[HDR10WidgetWinDXGI] WM_DISPLAYCHANGE:"
+      qInfo() << "[NativeDXGIRenderer] WM_DISPLAYCHANGE:"
               << "bpp=" << msg->wParam
               << "res=" << LOWORD(msg->lParam) << "x" << HIWORD(msg->lParam);
       QTimer::singleShot(100, this, [this]() {

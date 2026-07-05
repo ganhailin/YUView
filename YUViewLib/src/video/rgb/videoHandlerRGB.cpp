@@ -544,7 +544,7 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     doubleBufferImage           = newImage;
     doubleBufferImageFrameIndex = frameIndex;
     // Note: We don't set doubleBufferVideoFrame here as it doesn't exist.
-    // Double buffering is for caching, HDR rendering uses current frame.
+    // Double buffering is for caching, renderer uses current frame.
   }
   else if (currentImageIndex != frameIndex)
   {
@@ -554,8 +554,8 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     currentImage      = newImage;
     currentImageIndex = frameIndex;
 
-    // For high bit-depth sources (>8 bits), also generate a real 16-bit buffer for HDR rendering
-    // This provides true high-bit-depth data to HDR10Widget instead of 8-bit expanded data
+    // For high bit-depth sources (>8 bits), also generate a real 16-bit buffer for renderer
+    // This provides true high-bit-depth data to OpenGLRenderer instead of 8-bit expanded data
     if (srcPixelFormat.getBitsPerSample() > 8)
     {
       const auto numPixels = frameSize.width * frameSize.height;
@@ -574,7 +574,7 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     else
     {
       // For 8-bit sources, clear any existing 16-bit buffer to save memory
-      // HDR10Widget will call generate16bitBuffer() if needed (8-bit compatibility)
+      // OpenGLRenderer will call generate16bitBuffer() if needed (8-bit compatibility)
       currentVideoFrame.clear();
     }
   }

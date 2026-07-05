@@ -37,29 +37,29 @@
 #include <QCheckBox>
 #include <QLabel>
 
-#include <ui/views/HDR10Widget.h>
+#include <ui/views/OpenGLRenderer.h>
 
 // Forward declarations
 class splitViewWidget;
 
 namespace Ui
 {
-class HDRSettingsDock;
+class RendererSettingsDock;
 }
 
-class HDRSettingsDock : public QWidget
+class RendererSettingsDock : public QWidget
 {
   Q_OBJECT
 
 public:
-  explicit HDRSettingsDock(QWidget *parent = nullptr);
-  ~HDRSettingsDock();
+  explicit RendererSettingsDock(QWidget *parent = nullptr);
+  ~RendererSettingsDock();
 
   void setSplitViewWidget(splitViewWidget *splitView);
 
   // Get current values
-  video::HDR10_EOTF eotf() const;
-  video::HDR10_ColorGamut colorGamut() const;
+  video::RendererEOTF eotf() const;
+  video::RendererColorGamut colorGamut() const;
   float gammaValue() const;
   float diffuseWhiteNits() const;
   float hdrBrightness() const;
@@ -89,7 +89,7 @@ private:
   QDoubleSpinBox *m_spinDiffuseWhite{};
   QDoubleSpinBox *m_spinBrightness{};
   QCheckBox      *m_checkDithering{};
-  QLabel         *m_labelHDRInfo{};
+  QLabel         *m_labelRendererInfo{};
   QLabel         *m_labelGamma{};
 
   splitViewWidget *m_splitView{};

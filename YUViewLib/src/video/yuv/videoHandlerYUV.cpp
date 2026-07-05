@@ -2892,7 +2892,7 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
   DEBUG_YUV("videoHandlerYUV::convertYUVToImage Done");
 }
 
-// Convert YUV data to 16-bit RGBA buffer for HDR rendering
+// Convert YUV data to 16-bit RGBA buffer for renderer
 // This function converts YUV (8-16 bits per sample) to a standard 16-bit RGBA output.
 // For input bit depth < 16, values are left-shifted to fill the 16-bit range.
 // Supports YUV 4:2:0, 4:2:2, 4:4:4, and 4:0:0 (monochrome) with planar and semi-planar formats.
@@ -3118,7 +3118,7 @@ void convertYUVTo16BitRGBAInternal(const QByteArray         &sourceBuffer,
   }
 }
 
-// Convert YUV data to 16-bit RGBA buffer for HDR rendering
+// Convert YUV data to 16-bit RGBA buffer for renderer
 void convertYUVTo16BitRGBA(const QByteArray         &sourceBuffer,
                            uint16_t                 *targetBuffer,
                            const Size                frameSize,
@@ -4170,7 +4170,7 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     doubleBufferImage           = newImage;
     doubleBufferImageFrameIndex = frameIndex;
     // Note: We don't set doubleBufferVideoFrame here as it doesn't exist.
-    // Double buffering is for caching, HDR rendering uses current frame.
+    // Double buffering is for caching, renderer uses current frame.
   }
   else if (currentImageIndex != frameIndex)
   {
@@ -4191,8 +4191,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     currentImage      = newImage;
     currentImageIndex = frameIndex;
 
-    // For high bit-depth sources (>8 bits), also generate a real 16-bit buffer for HDR rendering
-    // This provides true high-bit-depth data to HDR10Widget instead of 8-bit expanded data
+    // For high bit-depth sources (>8 bits), also generate a real 16-bit buffer for renderer
+    // This provides true high-bit-depth data to OpenGLRenderer instead of 8-bit expanded data
     if (this->srcPixelFormat.getBitsPerSample() > 8)
     {
       const auto numPixels = frameSize.width * frameSize.height;
@@ -4209,7 +4209,7 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     else
     {
       // For 8-bit sources, clear any existing 16-bit buffer to save memory
-      // HDR10Widget will call generate16bitBuffer() if needed (8-bit compatibility)
+      // OpenGLRenderer will call generate16bitBuffer() if needed (8-bit compatibility)
       currentVideoFrame.clear();
     }
   }
