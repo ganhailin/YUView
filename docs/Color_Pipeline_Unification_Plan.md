@@ -1,7 +1,9 @@
 # 色彩管线统一与 Windows ACM/HDR 动态检测方案
 
 **创建日期:** 2026-06-23  
-**状态:** 实施中
+**状态:** 已实施（P0/P1 完成，重命名详见 `docs/Renderer_Rename_Plan.md`）
+
+> 说明：本文档创建于 renderer 重命名之前。下方引用的类名/文件名/信号名已更新为重命名后的名称：`HDR10Widget`→`OpenGLRenderer`、`HDR10WidgetWinDXGI`→`NativeDXGIRenderer`、`HDR10WidgetMacEDR`→`NativeEDRRenderer`、`HDRSettingsDock`→`RendererSettingsDock`、`hdr10_fragment.glsl`→`opengl_fragment.glsl`、`HDR10_EOTF`→`RendererEOTF`、`hdrStatusChanged`→`rendererStatusChanged`。
 
 ---
 
@@ -11,7 +13,7 @@
 
 YUView 有 3 个显示渲染后端，色彩处理代码重复三遍且存在不一致：
 
-| 差异点 | OpenGL (`hdr10_fragment.glsl`) | DXGI (`HDR10WidgetWinDXGI.cpp`) | Metal (`MacEDRRenderer.mm`) |
+| 差异点 | OpenGL (`opengl_fragment.glsl`) | DXGI (`NativeDXGIRenderer.cpp`) | Metal (`MacEDRRenderer.mm`) |
 |---|---|---|---|
 | 色域转换目标 | Display P3 | BT.709 | Display P3 |
 | Tonemapping | 无（sRGB OETF 硬裁剪） | Reinhard（仅 SDR 模式） | 无（系统 EDR 处理） |
@@ -19,7 +21,7 @@ YUView 有 3 个显示渲染后端，色彩处理代码重复三遍且存在不�
 | HLG 缩放 | ×4（相对） | ×(sdrWhite×4/80)（scRGB） | ×4（相对） |
 | 色域矩阵 | BT2020→P3 等 3 个 | BT2020→BT709 等 3 个 | 与 OpenGL 相同 |
 | EOTF 函数 | 重复 | 重复（HLG b 常量写法略不同） | 重复 |
-| 枚举类型 | `HDR10_EOTF` | 复用 `HDR10_EOTF` | 独立 `EOTF`/`ColorGamut` |
+| 枚举类型 | `RendererEOTF` | 复用 `RendererEOTF` | 独立 `EOTF`/`ColorGamut` |
 
 ### 1.2 Windows ACM 未检测
 
@@ -83,11 +85,11 @@ m_caps.systemHandlesTonemapping = m_caps.hdrActive || m_caps.acmActive;
 
 #### 3.3 WM_DISPLAYCHANGE 监听
 
-在 `HDR10WidgetWinDXGI` 中：
+在 `NativeDXGIRenderer` 中：
 - 新增 `nativeEvent()` override
 - 监听 `WM_DISPLAYCHANGE` 消息
 - 延迟 100ms 重新检测 HDR/ACM 能力（避免重入 DXGI）
-- 发出 `hdrStatusChanged` 信号触发重渲染
+- 发出 `rendererStatusChanged` 信号触发重渲染
 
 #### 3.4 着色器 tonemapping 逻辑修改
 
@@ -100,9 +102,9 @@ DXGI pixel shader 的 constant buffer 新增 `systemHandlesTonemapping` 字段�
 #### 3.5 信号链扩展
 
 ```
-HDR10WidgetWinDXGI::hdrStatusChanged(hdrActive, systemHandlesTonemapping, maxNits, sdrWhiteNits)
-  → SplitViewWidget::hdrStatusChanged
-    → HDRSettingsDock::setHDRInfo
+NativeDXGIRenderer::rendererStatusChanged(hdrActive, systemHandlesTonemapping, maxNits, sdrWhiteNits)
+  → SplitViewWidget::rendererStatusChanged
+    → RendererSettingsDock::setHDRInfo
 ```
 
 ### P1: 抽取 `ColorPipeline` 模块
@@ -118,14 +120,14 @@ HDR10WidgetWinDXGI::hdrStatusChanged(hdrActive, systemHandlesTonemapping, maxNit
 
 #### 3.7 逐个后端替换
 
-- `HDR10Widget.cpp` → 删除本地矩阵/EOTF，改用 ColorPipeline
-- `HDR10WidgetWinDXGI.cpp` → 删除内联 shader，改用生成函数
+- `OpenGLRenderer.cpp` → 删除本地矩阵/EOTF，改用 ColorPipeline
+- `NativeDXGIRenderer.cpp` → 删除内联 shader，改用生成函数
 - `MacEDRRenderer.mm` → 删除内联 shader，改用生成函数（不做 tonemapping）
 - 统一枚举，消除 `static_cast`
 
 ### P2: UI 更新
 
-- HDRSettingsDock 显示 ACM/HDR 状态
+- `RendererSettingsDock` 显示 ACM/HDR 状态
 - 文档更新（删除对不存在的 `hdr10_fragment_edr.glsl` 的引用）
 
 ---
@@ -136,17 +138,17 @@ HDR10WidgetWinDXGI::hdrStatusChanged(hdrActive, systemHandlesTonemapping, maxNit
 |---|---|---|
 | `src/ui/views/DXGISwapChain.h` | `HDRCapabilities` 增加 `acmActive`、`systemHandlesTonemapping` | P0 |
 | `src/ui/views/DXGISwapChain.cpp` | `detectHDRCapabilities()` 增加 ACM 检测 | P0 |
-| `src/ui/views/HDR10WidgetWinDXGI.h` | 新增 `nativeEvent()` override | P0 |
-| `src/ui/views/HDR10WidgetWinDXGI.cpp` | 新增 `nativeEvent()`；shader tonemapping 改用 `systemHandlesTonemapping`；constant buffer 扩展 | P0 |
-| `src/ui/views/SplitViewWidget.h` | `hdrStatusChanged` 信号扩展参数 | P0 |
+| `src/ui/views/NativeDXGIRenderer.h` | 新增 `nativeEvent()` override | P0 |
+| `src/ui/views/NativeDXGIRenderer.cpp` | 新增 `nativeEvent()`；shader tonemapping 改用 `systemHandlesTonemapping`；constant buffer 扩展 | P0 |
+| `src/ui/views/SplitViewWidget.h` | `rendererStatusChanged` 信号扩展参数 | P0 |
 | `src/ui/views/SplitViewWidget.cpp` | 信号转发适配 | P0 |
-| `src/ui/HDRSettingsDock.h` | `setHDRInfo` 扩展参数 | P0 |
-| `src/ui/HDRSettingsDock.cpp` | 显示 ACM 状态 | P0 |
+| `src/ui/RendererSettingsDock.h` | `setHDRInfo` 扩展参数 | P0 |
+| `src/ui/RendererSettingsDock.cpp` | 显示 ACM 状态 | P0 |
 | `src/common/ColorPipeline.h` | **新建** | P1 |
 | `src/common/ColorPipeline.cpp` | **新建** | P1 |
-| `src/ui/views/HDR10Widget.cpp` | 改用 ColorPipeline | P1 |
-| `src/ui/views/HDR10Widget.h` | 枚举改为 typedef | P1 |
-| `shaders/hdr10_fragment.glsl` | 添加 Reinhard | P1 |
-| `shaders/hdr10_fragment_dither.glsl` | 添加 Reinhard | P1 |
+| `src/ui/views/OpenGLRenderer.cpp` | 改用 ColorPipeline | P1 |
+| `src/ui/views/OpenGLRenderer.h` | 枚举改为 typedef | P1 |
+| `shaders/opengl_fragment.glsl` | 添加 Reinhard | P1 |
+| `shaders/opengl_fragment_dither.glsl` | 添加 Reinhard | P1 |
 | `src/ui/views/MacEDRRenderer.mm` | 改用 ColorPipeline | P1 |
-| `src/ui/views/HDR10WidgetMacEDR.h` | 删除独立枚举 | P1 |
+| `src/ui/views/NativeEDRRenderer.h` | 删除独立枚举 | P1 |

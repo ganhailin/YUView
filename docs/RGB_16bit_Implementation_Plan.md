@@ -2,23 +2,25 @@
 
 ## 文档信息
 - **创建日期**: 2026-05-08
-- **更新日期**: 2026-05-08
-- **目标**: 将 HDR10Widget 的16bit显示功能从"伪16bit"升级到真实10/16bit数据通路
+- **更新日期**: 2026-07-06（更新 renderer 重命名后的类名/文件名）
+- **目标**: 将 OpenGLRenderer 的16bit显示功能从"伪16bit"升级到真实10/16bit数据通路
 - **状态**: ✅ 已完成 (RGB + YUV)
+
+> 历史命名：文档创建时该类名为 `HDR10Widget`，现已重命名为 `OpenGLRenderer`；shader `hdr10_fragment.glsl`→`opengl_fragment.glsl`、`hdr10_fragment_dither.glsl`→`opengl_fragment_dither.glsl`。详见 `docs/Renderer_Rename_Plan.md`。
 
 ---
 
 ## 1. 项目概述
 
 ### 1.1 背景
-HDR10Widget 已支持 16-bit OpenGL 渲染，但数据源存在问题：
+OpenGLRenderer 已支持 16-bit OpenGL 渲染，但数据源存在问题：
 - **RGB源**: 高 bit 深度数据被转换为 8-bit QImage，再扩展为"伪16bit"
 - **YUV源**: 同样问题，YUV→8bit RGB→扩展16bit
 
 ### 1.2 目标
-实现从源到 HDR10Widget 的**真实高 bit 深度数据通路**：
+实现从源到 OpenGLRenderer 的**真实高 bit 深度数据通路**：
 - 8-bit 源: 保持兼容 (r*257 扩展)
-- 10/12/16-bit 源: 真实精度直通 HDR10Widget
+- 10/12/16-bit 源: 真实精度直通 OpenGLRenderer
 
 ---
 
@@ -37,7 +39,7 @@ currentFrameRawData (原始字节)
     ↓
 VideoFrame.set16bitBuffer() → currentVideoFrame
     ↓
-HDR10Widget (真实16-bit 渲染)
+OpenGLRenderer (真实16-bit 渲染)
 ```
 
 ### 2.2 YUV 数据流 (✅ 已完成)
@@ -55,7 +57,7 @@ currentFrameRawYUVData
     ↓
 VideoFrame.set16bitBuffer() → currentVideoFrame
     ↓
-HDR10Widget (真实16-bit 渲染)
+OpenGLRenderer (真实16-bit 渲染)
 ```
 
 ---
@@ -129,9 +131,9 @@ void convertYUVTo16BitRGBA(
 3. **颜色转换**: 使用标准 YUV→RGB 系数，结果存储为16bit RGBA
 4. **字节序**: 支持大端/小端格式
 
-### 3.3 HDR10Widget 适配 (✅)
+### 3.3 OpenGLRenderer 适配 (✅)
 
-**文件**: `YUViewLib/src/ui/views/HDR10Widget.cpp`
+**文件**: `YUViewLib/src/ui/views/OpenGLRenderer.cpp`
 
 ```cpp
 void updateTexture() {
@@ -149,7 +151,7 @@ void updateTexture() {
 
 ### 3.4 Shader 更新 (✅)
 
-**标准 Shader** (`hdr10_fragment.glsl`):
+**标准 Shader** (`opengl_fragment.glsl`):
 ```glsl
 void main() {
     uvec4 raw = texture(texture16bit, vTexCoord);
@@ -158,7 +160,7 @@ void main() {
 }
 ```
 
-**抖动 Shader** (`hdr10_fragment_dither.glsl`):
+**抖动 Shader** (`opengl_fragment_dither.glsl`):
 ```glsl
 // Bayer 4x4 抖动到 8-bit，预计算浮点值优化
 float bayerDither4x4(vec2 position) {
@@ -210,10 +212,10 @@ float bayerDither4x4(vec2 position) {
 - `/home/hailin/YUView/YUViewLib/src/video/yuv/videoHandlerYUV.cpp`
 
 ### 显示
-- `/home/hailin/YUView/YUViewLib/src/ui/views/HDR10Widget.h`
-- `/home/hailin/YUView/YUViewLib/src/ui/views/HDR10Widget.cpp`
-- `/home/hailin/YUView/YUViewLib/shaders/hdr10_fragment.glsl`
-- `/home/hailin/YUView/YUViewLib/shaders/hdr10_fragment_dither.glsl`
+- `/home/hailin/YUView/YUViewLib/src/ui/views/OpenGLRenderer.h`
+- `/home/hailin/YUView/YUViewLib/src/ui/views/OpenGLRenderer.cpp`
+- `/home/hailin/YUView/YUViewLib/shaders/opengl_fragment.glsl`
+- `/home/hailin/YUView/YUViewLib/shaders/opengl_fragment_dither.glsl`
 
 ---
 
@@ -227,9 +229,9 @@ float bayerDither4x4(vec2 position) {
 | videoHandlerRGB 设置16-bit buffer | ✅ | `videoHandlerRGB.cpp` |
 | videoHandlerYUV 16-bit 转换函数 | ✅ | `videoHandlerYUV.cpp` |
 | videoHandlerYUV 设置16-bit buffer | ✅ | `videoHandlerYUV.cpp` |
-| HDR10Widget 智能检测 | ✅ | `HDR10Widget.cpp` |
-| Shader 简化归一化 | ✅ | `hdr10_fragment.glsl` |
-| Dithering shader 优化 | ✅ | `hdr10_fragment_dither.glsl` |
+| OpenGLRenderer 智能检测 | ✅ | `OpenGLRenderer.cpp` |
+| Shader 简化归一化 | ✅ | `opengl_fragment.glsl` |
+| Dithering shader 优化 | ✅ | `opengl_fragment_dither.glsl` |
 | 8-bit 兼容性保证 | ✅ | 所有相关文件 |
 | 编译验证 | ✅ | 通过 |
 

@@ -1,16 +1,30 @@
-# HDR10Widget 功能开发总结
+# Renderer 功能开发总结
 
-**文档生成日期:** 2026-05-10 (更新: 2025-06)
+**文档生成日期:** 2026-05-10 (更新: 2025-06, 重命名同步: 2026-07-06)
 
 **基于提交范围:** f4ea421a..d164e7ff (9个提交) + EDR 扩展提交
+
+> **命名变更说明**：本文档记录的开发工作发生在 renderer 重命名之前。文中出现的旧名称对应如下（详见 `docs/Renderer_Rename_Plan.md`，重命名提交 `cf195e3d`）：
+> - `HDR10Widget` → `OpenGLRenderer`（`HDR10Widget.cpp/h` → `OpenGLRenderer.cpp/h`）
+> - `HDR10WidgetMacEDR` → `NativeEDRRenderer`
+> - `HDR10WidgetWinDXGI` → `NativeDXGIRenderer`
+> - `HDRSettingsDock` → `RendererSettingsDock`
+> - `EDRSettingsDialog`（已删除，设置并入 `RendererSettingsDock`）
+> - shader `hdr10_fragment.glsl` → `opengl_fragment.glsl`、`hdr10_fragment_dither.glsl` → `opengl_fragment_dither.glsl`、`hdr10_vertex.glsl` → `opengl_vertex.glsl`
+> - `hdr10_fragment_edr.glsl`（已删除，EDR 统一由 Metal 路径处理）
+> - 枚举 `HDR10_EOTF` → `RendererEOTF`、`HDR10_ColorGamut` → `RendererColorGamut`
+> - 信号 `hdrStatusChanged` → `rendererStatusChanged`
+> - 变量 `hdr10Widget` → `glRenderer`、`hdr10WidgetMacEDR` → `edrRenderer`
+>
+> 下方的提交描述保留历史原貌，仅"当前架构"相关小节（3.1–3.4）已更新为新名称。
 
 ---
 
 ## 1. 概述
 
-本阶段开发主要围绕 YUView 的 HDR10Widget 组件展开，实现了对 10-bit/16-bit HDR 视频的高质量渲染支持。核心功能包括：OpenGL 10-bit 渲染管线、像素值显示、16-bit 数据处理通道以及 YUV/RGB 双格式支持。
+本阶段开发主要围绕 YUView 的 OpenGLRenderer（原名 HDR10Widget）组件展开，实现了对 10-bit/16-bit HDR 视频的高质量渲染支持。核心功能包括：OpenGL 10-bit 渲染管线、像素值显示、16-bit 数据处理通道以及 YUV/RGB 双格式支持。
 
-**EDR 扩展**: 在 macOS 上，新增 Metal EDR 渲染路径，通过 `HDR10WidgetMacEDR` + `MacEDRRenderer` 实现 Extended Dynamic Range 显示，使 HDR 视频能够在支持 EDR 的 Mac 显示器上呈现 >1.0 SDR 白的亮度值。
+**EDR 扩展**: 在 macOS 上，新增 Metal EDR 渲染路径，通过 `NativeEDRRenderer`（原名 `HDR10WidgetMacEDR`）+ `MacEDRRenderer` 实现 Extended Dynamic Range 显示，使 HDR 视频能够在支持 EDR 的 Mac 显示器上呈现 >1.0 SDR 白的亮度值。
 
 ---
 
@@ -61,7 +75,7 @@
 - `videoHandlerRGB` 扩展支持 16-bit 格式
 - 更新 HDR10 着色器以支持 16-bit 输入
 - 添加详细文档：
-  - `HDR10Widget_Documentation.md` (712行)
+  - `Renderer_Documentation.md` (原 HDR10Widget_Documentation.md, 712行)
   - `RGB_16bit_Implementation_Plan.md` (448行)
 
 **文件影响:** 9个文件，+1410/-34 行代码
@@ -133,48 +147,48 @@
 ### 3.1 新增组件
 
 ```
-YUViewLib/src/ui/views/HDR10Widget.cpp/h        # 核心 HDR10 显示组件 (OpenGL)
-YUViewLib/src/ui/views/HDR10WidgetMacEDR.h/cpp   # macOS EDR 入口 (Metal)
-YUViewLib/src/ui/views/MacEDRRenderer.h/mm        # Metal 渲染核心 (Objective-C++)
-YUViewLib/src/ui/views/MacEDRUtil.h/mm            # EDR 屏幕检测 (Objective-C++)
-YUViewLib/src/video/VideoFrame.cpp/h              # 10-bit 帧数据结构
-YUViewLib/src/video/rgb/ConversionRGB.cpp/h       # 16-bit RGB 转换
+YUViewLib/src/ui/views/OpenGLRenderer.cpp/h          # 核心 HDR 显示组件 (OpenGL，原名 HDR10Widget)
+YUViewLib/src/ui/views/NativeEDRRenderer.h/cpp      # macOS EDR 入口 (Metal，原名 HDR10WidgetMacEDR)
+YUViewLib/src/ui/views/MacEDRRenderer.h/mm           # Metal 渲染核心 (Objective-C++)
+YUViewLib/src/ui/views/MacEDRUtil.h/mm              # EDR 屏幕检测 (Objective-C++)
+YUViewLib/src/video/VideoFrame.cpp/h               # 10-bit 帧数据结构
+YUViewLib/src/video/rgb/ConversionRGB.cpp/h          # 16-bit RGB 转换
 ```
 
 ### 3.2 着色器资源
 
 ```
 YUViewLib/shaders/
-├── hdr10_fragment.glsl           # 标准 HDR 渲染
-├── hdr10_fragment_dither.glsl    # 抖动 HDR 渲染
-├── hdr10_fragment_edr.glsl       # EDR 色彩处理渲染
-├── hdr10_vertex.glsl             # 顶点着色器
+├── opengl_fragment.glsl           # 标准 HDR 渲染 (原名 hdr10_fragment.glsl)
+├── opengl_fragment_dither.glsl    # 抖动 HDR 渲染 (原名 hdr10_fragment_dither.glsl)
+├── opengl_vertex.glsl             # 顶点着色器 (原名 hdr10_vertex.glsl)
 └── shaders.qrc
 ```
+
+> 注：历史版本的 `hdr10_fragment_edr.glsl`（EDR 色彩处理着色器）已在提交 `09a06cac` 中删除，EDR 渲染统一由 macOS Metal 路径处理。
 
 ### 3.3 UI 资源
 
 ```
 YUViewLib/ui/
-├── edrSettingsDialog.ui          # EDR 设置对话框
-└── edrSettingsDialog.h/cpp       # 对话框逻辑 (自动生成/手动)
+└── (EDR 设置已并入 RendererSettingsDock dock 面板)
 ```
+
+> 注：历史版本的独立 `edrSettingsDialog.ui`/`EDRSettingsDialog.h/cpp` 已删除，EOTF/色域/Gamma/漫射白/亮度等设置现集成在 `RendererSettingsDock` 中。
 
 ### 3.4 macOS 双路径架构
 
 ```
 SplitViewWidget
-    ├── HDR10WidgetMacEDR (Metal 路径)  ← macOS EDR 首选
+    ├── NativeEDRRenderer (Metal 路径)  ← macOS EDR 首选 (原名 HDR10WidgetMacEDR)
     │     ├── MacEDRRenderer
     │     │     ├── CAMetalLayer (RGBA16Float, wantsExtendedDynamicRangeContent=YES)
     │     │     └── CALayer overlay (像素值/缩放叠加)
     │     └ MacEDRUtil (EDR 检测)
     │
-    └── HDR10Widget (OpenGL 路径)       ← SDR fallback / 非 macOS
-          ├── hdr10_fragment.glsl
-          ├── hdr10_fragment_dither.glsl
-          ├── hdr10_fragment_edr.glsl (非 macOS)
-          └ PixelOverlay (QPainter 叠加)
+    └── OpenGLRenderer (OpenGL 路径)       ← SDR fallback / 非 macOS (原名 HDR10Widget)
+          ├── opengl_fragment.glsl
+          └── opengl_fragment_dither.glsl
 ```
 
 **关键设计决策:**
@@ -238,16 +252,16 @@ f4ea421a  (基线) Allow buffer allocation for smaller frame sizes
 5. **坐标显示** - 实时坐标与缩放比例指示
 6. **自适应字体** - 根据背景自动切换黑/白字体颜色
 7. **macOS EDR 显示** - Metal 路径实现 >1.0 SDR 白亮度输出
-8. **EDR 设置对话框** - 可配置 EOTF、色域、Gamma、漫射白、亮度参数
+8. **渲染器设置面板** - 可配置渲染模式、EOTF、色域、Gamma、漫射白、亮度参数（集成在 `RendererSettingsDock`）
 9. **双路径渲染** - macOS Metal EDR + OpenGL SDR fallback
 
 ---
 
 ## 7. 后续建议
 
-1. 考虑将 HDR10Widget 文档整合到主文档系统
+1. 考虑将 OpenGLRenderer 文档整合到主文档系统
 2. 补充单元测试覆盖 16-bit 数据处理路径
 3. 评估性能优化（大分辨率 HDR 内容）
 4. 考虑支持更多 HDR 格式（HLG, Dolby Vision 等）
 5. 考虑 EDR 路径的 GPU 加速 YUV 色域转换
-6. 评估非 macOS 平台（Windows/Linux）的 HDR 显示器原生支持
+6. 评估非 macOS 平台（Windows/Linux）的 HDR 显示器原生支持（Windows DXGI 已实现为 `NativeDXGIRenderer`）
