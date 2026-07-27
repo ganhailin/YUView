@@ -324,7 +324,11 @@ const float *getGamutMatrixForDisplay(ColorGamut          source,
     return getGamutMatrix(source, ColorGamut::BT709);
 
   auto primaries = display.primaries();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
   auto desc = display.description();
+#else
+  auto desc = QStringLiteral("(Qt5 — description() unavailable)");
+#endif
 
   // ── Tier 1: primaries enum ──────────────────────────────────
   switch (primaries)
