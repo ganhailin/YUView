@@ -45,6 +45,9 @@
 #include <QPainter>
 #include <QProcess>
 #include <QTemporaryFile>
+#include <QSettings>
+#include <QMessageBox>
+#include <QApplication>
 
 #include <common/Formatting.h>
 #include <common/Functions.h>
@@ -4080,17 +4083,25 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     settings.beginGroup("RKTools");
     QString afbcDecoderPath = settings.value("AFBCDecoderPath", "").toString();
     settings.endGroup();
-    if (!afbcDecoderPath.isEmpty())
+    if (afbcDecoderPath.isEmpty())
     {
-      // Write raw AFBC data to a temp file
+      QString errorMsg = QString("AFBC decoder path is not set. The frame could not be decoded.\n\n"
+                                 "Please set the AFBC decoder path in Settings (RKTools > AFBCDecoderPath).");
+      qDebug() << "[AFBC] Error:" << errorMsg;
+      QMetaObject::invokeMethod(qApp, [errorMsg]() {
+        QMessageBox::warning(nullptr, "AFBC Decoder Path Not Set", errorMsg);
+      }, Qt::QueuedConnection);
+    }
+    else
+    {
+      // Write raw AFBC data to a temp file (auto-removed when tempIn goes out of scope)
       QTemporaryFile tempIn(QDir::temp().filePath("afbc_XXXXXX.raw"));
-      tempIn.setAutoRemove(false);
       tempIn.open();
       tempIn.write(this->currentFrameRawData);
+      size_t old_size = this->currentFrameRawData.size();
       tempIn.close();
 
       QTemporaryFile tempOut(QDir::temp().filePath("raster_XXXXXX.raw"));
-      tempOut.setAutoRemove(false);
       tempOut.open();
       tempOut.close();
 
@@ -4142,10 +4153,33 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
             qDebug() << "[AFBC] Output raster size:" << this->currentFrameRawData.size() << "bytes";
           }
         }
+        else
+        {
+          QString errorMsg = QString("AFBC decoder exited with code %1.\n\nCommand: %2 %3\n\nstdout:\n%4\n\nstderr:\n%5")
+              .arg(decoderProcess.exitCode())
+              .arg(afbcDecoderPath)
+              .arg(args.join(" "))
+              .arg(stdoutStr)
+              .arg(stderrStr);
+          qDebug() << "[AFBC] Error:" << errorMsg;
+          QMetaObject::invokeMethod(qApp, [errorMsg]() {
+            QMessageBox::critical(nullptr, "AFBC Decoder Error", errorMsg);
+          }, Qt::QueuedConnection);
+        }
       }
       else
       {
-        qDebug() << "[AFBC] Process timed out or failed to start";
+        QString errorMsg = QString("AFBC decoder process timed out or failed to start.\n\nCommand: %1 %2\n\nProcess error: %3")
+            .arg(afbcDecoderPath)
+            .arg(args.join(" "))
+            .arg(decoderProcess.errorString());
+        qDebug() << "[AFBC] Error:" << errorMsg;
+        QMetaObject::invokeMethod(qApp, [errorMsg]() {
+          QMessageBox::critical(nullptr, "AFBC Decoder Error", errorMsg);
+        }, Qt::QueuedConnection);
+      }
+      if(this->currentFrameRawData.size() < old_size){
+        this->currentFrameRawData.resize(old_size);
       }
     }
   }
