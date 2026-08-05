@@ -142,6 +142,7 @@ public:
   // Format properties
   [[nodiscard]] virtual std::string getName() const = 0;
   [[nodiscard]] virtual unsigned    getBitsPerSample() const = 0;
+  [[nodiscard]] virtual unsigned    getBitsPerSampleForAlpha() const { return getBitsPerSample(); }
   [[nodiscard]] virtual bool        hasAlpha() const = 0;
   [[nodiscard]] virtual unsigned    getNrChannels() const = 0;
   [[nodiscard]] virtual std::size_t bytesPerFrame(Size frameSize) const = 0;
@@ -237,6 +238,10 @@ public:
   std::string getName() const;
 
   unsigned     getBitsPerSample() const;
+  unsigned     getBitsPerSampleForAlpha() const {
+    return predefinedFormat ? getPredefinedHandler()->getBitsPerSampleForAlpha()
+                            : (alphaMode == AlphaMode::None ? 0 : getBitsPerSample());
+  }
   DataLayout   getDataLayout() const { return this->dataLayout; }
   ChannelOrder getChannelOrder() const { return this->channelOrder; }
   Endianness   getEndianess() const { return this->endianness; }

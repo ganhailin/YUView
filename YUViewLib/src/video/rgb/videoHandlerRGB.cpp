@@ -507,7 +507,7 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
       // Build mode string like "r8g8b8" or "r8g8b8a8"
       QString mode = QString("r%1g%2b%3").arg(bitsPerSample).arg(bitsPerSample).arg(bitsPerSample);
       if (hasAlpha)
-        mode += QString("a%1").arg(bitsPerSample);
+        mode += QString("a%1").arg(this->srcPixelFormat.getBitsPerSampleForAlpha());
       mode += this->getAfbcModeSuffix();
 
       QStringList args;

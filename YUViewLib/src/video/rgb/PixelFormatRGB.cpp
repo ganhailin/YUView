@@ -51,6 +51,7 @@ class AB30Handler : public PredefinedRGBFormatHandler
 {
 public:
   [[nodiscard]] std::string getName() const override { return "AB30"; }
+  [[nodiscard]] unsigned    getBitsPerSampleForAlpha() const override { return 2; }
   [[nodiscard]] unsigned    getBitsPerSample() const override { return 10; }
   [[nodiscard]] bool        hasAlpha() const override { return true; }
   [[nodiscard]] unsigned    getNrChannels() const override { return 4; }
