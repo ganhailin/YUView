@@ -124,8 +124,9 @@ void OpenGLRenderer::setFrame(const VideoFrame &frame)
   auto old_size_empty = m_frameSize.isEmpty();
   std::shared_ptr<QImage> newImage8 = frame.getImage8bit();
   std::shared_ptr<QImage> oldImage8 = m_currentFrame.getImage8bit();
+  bool colorConfigChanged = (frame.getSourceColorConfig() != m_currentFrame.getSourceColorConfig());
   if (newData != oldData || (new_size_empty != old_size_empty && (frame.getSize() != m_frameSize)) ||
-      newImage8 != oldImage8)
+      newImage8 != oldImage8 || colorConfigChanged)
   {
     m_currentFrame = frame;
     if (!newData)
@@ -473,9 +474,11 @@ void OpenGLRenderer::paintGL()
   glUniform1i(currentProgram->uniformLocation("texture16bit"), 0);
 
   // Set color processing uniforms (EOTF, gamut, brightness)
-  // These are used by both standard and dither shaders for SDR output
-  glUniform1i(currentProgram->uniformLocation("eotfType"), static_cast<int>(m_eotf));
-  glUniform1f(currentProgram->uniformLocation("gammaValue"), m_gammaValue);
+  // EOTF/Gamut/Gamma come from the frame's SourceColorConfig (per-image),
+  // while diffuseWhiteNits and hdrBrightness are display-side settings.
+  const auto &scc = m_currentFrame.getSourceColorConfig();
+  glUniform1i(currentProgram->uniformLocation("eotfType"), static_cast<int>(scc.eotf));
+  glUniform1f(currentProgram->uniformLocation("gammaValue"), scc.gammaValue);
   glUniform1f(currentProgram->uniformLocation("diffuseWhiteNits"), m_diffuseWhiteNits);
   glUniform1f(currentProgram->uniformLocation("hdrBrightness"), m_hdrBrightness);
 
@@ -507,18 +510,18 @@ void OpenGLRenderer::paintGL()
       (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
   if (acmActive || surfaceIsSRGB)
   {
-    matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+    matrixData = color::getGamutMatrix(scc.sourceGamut, color::ColorGamut::BT709);
   }
   else
   {
     auto displayCS = functionsGui::getDisplayColorSpace();
     if (displayCS.isValid())
     {
-      matrixData = color::getGamutMatrixForDisplay(m_colorGamut, displayCS, customMatrix);
+      matrixData = color::getGamutMatrixForDisplay(scc.sourceGamut, displayCS, customMatrix);
     }
     else
     {
-      matrixData = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+      matrixData = color::getGamutMatrix(scc.sourceGamut, color::ColorGamut::BT709);
     }
   }
   QMatrix3x3 gamutMat;

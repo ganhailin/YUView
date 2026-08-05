@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <common/ColorPipeline.h>
 #include <common/EnumMapper.h>
 #include <common/InfoItemAndData.h>
 #include <common/SaveUi.h>
@@ -178,6 +179,12 @@ public:
   // Called when the FBC format changes. Derived classes can override to invalidate caches.
   virtual void onFbcFormatChanged() {}
 
+  // ── Source color configuration (per-image) ───────────────────
+  // These values describe how the pixel code values were encoded
+  // (EOTF + primaries + gamma). They travel with the image, not the renderer.
+  virtual const color::SourceColorConfig &getSourceColorConfig() const { return m_sourceColorConfig; }
+  virtual void setSourceColorConfig(const color::SourceColorConfig &config);
+
 signals:
   // Signaled if something about the item changed. redrawNeeded is true if the handler needs to be
   // redrawn.
@@ -194,6 +201,9 @@ protected:
   int        afbcYoffset{0};
   AFBCLayout afbcLayout{AFBCLayout::Block16x16_444};
 
+  // Per-image source color configuration (EOTF, gamut, gamma)
+  color::SourceColorConfig m_sourceColorConfig;
+
   // Get the pixel value from currentImage. Make sure that currentImage is the correct image.
   QRgb         getPixelVal(const QPoint &pos) { return getPixelVal(pos.x(), pos.y()); }
   virtual QRgb getPixelVal(int x, int y) { return currentImage.pixel(x, y); }
@@ -209,6 +219,19 @@ protected:
 
   // Update the enabled state of AFBC option widgets based on current fbcFormat and afbcCustomOptions.
   void updateAfbcOptionWidgetsEnabled();
+
+  // Update enabled state of the gamma spin box (only enabled when EOTF == Gamma).
+  void updateColorControlsEnabled();
+
+  // Check if the source color controls (EOTF/Gamut/Gamma) changed.
+  // Uses sender() matching, same pattern as checkFbcFormatChanged/checkAfbcOptionsChanged.
+  // Returns true if the sender was a color control.
+  bool checkSourceColorChanged();
+
+  // Disable the source color controls (EOTF/Gamut/Gamma) so derived classes
+  // like videoHandlerDifference/videoHandlerResample can make them read-only
+  // when the config is inherited from child items.
+  void disableSourceColorControls();
 
   QSettings settings;
 

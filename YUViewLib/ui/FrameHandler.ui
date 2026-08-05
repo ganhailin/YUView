@@ -15,7 +15,7 @@
   </property>
   <layout class="QVBoxLayout" name="wrapperLayout">
    <item>
-    <layout class="QGridLayout" name="frameHandlerLayout" rowstretch="0,0,0,0,0,0,0,0,0" columnstretch="0,1,0,1">
+    <layout class="QGridLayout" name="frameHandlerLayout" rowstretch="0,0,0,0,0,0,0,0,0,0,0,0,0" columnstretch="0,1,0,1">
      <item row="3" column="2" colspan="2">
       <widget class="QComboBox" name="frameSizeComboBox">
        <property name="toolTip">
@@ -137,6 +137,43 @@
        </property>
       </widget>
      </item>
+     <item row="9" column="0" colspan="4">
+      <widget class="QLabel" name="labelColorSection">
+       <property name="text">
+        <string>Source Color</string>
+       </property>
+      </widget>
+     </item>
+     <item row="10" column="0" colspan="2">
+      <widget class="QLabel" name="labelEOTF">
+       <property name="text">
+        <string>EOTF</string>
+       </property>
+      </widget>
+     </item>
+     <item row="10" column="2" colspan="2">
+      <widget class="QComboBox" name="eotfComboBox"/>
+     </item>
+     <item row="11" column="0" colspan="2">
+      <widget class="QLabel" name="labelGamut">
+       <property name="text">
+        <string>Gamut</string>
+       </property>
+      </widget>
+     </item>
+     <item row="11" column="2" colspan="2">
+      <widget class="QComboBox" name="gamutComboBox"/>
+     </item>
+     <item row="12" column="0" colspan="2">
+      <widget class="QLabel" name="labelGamma">
+       <property name="text">
+        <string>Gamma</string>
+       </property>
+      </widget>
+     </item>
+     <item row="12" column="2" colspan="2">
+      <widget class="QDoubleSpinBox" name="gammaSpinBox"/>
+     </item>
     </layout>
    </item>
   </layout>
@@ -151,6 +188,9 @@
   <tabstop>afbcSplitModeCheckBox</tabstop>
   <tabstop>afbcYoffsetSpinBox</tabstop>
   <tabstop>afbcLayoutComboBox</tabstop>
+  <tabstop>eotfComboBox</tabstop>
+  <tabstop>gamutComboBox</tabstop>
+  <tabstop>gammaSpinBox</tabstop>
  </tabstops>
  <resources/>
  <connections/>

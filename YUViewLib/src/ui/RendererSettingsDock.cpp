@@ -93,49 +93,17 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
   line1->setFrameShape(QFrame::HLine);
   mainLayout->addWidget(line1);
 
-  // ── Color Processing section ─────────────────────────────────────
+  // ── Display Color Processing section ─────────────────────────────
+  // EOTF, Color Gamut, and Gamma are now per-image settings (FrameHandler).
+  // Only display-side parameters remain here.
 
-  auto *labelColorSection = new QLabel("Color Processing");
+  auto *labelColorSection = new QLabel("Display Color");
   labelColorSection->setFont(boldFont);
   mainLayout->addWidget(labelColorSection);
 
   auto *gridLayout = new QGridLayout();
   gridLayout->setHorizontalSpacing(8);
   gridLayout->setVerticalSpacing(4);
-
-  // EOTF
-  auto *labelEOTF = new QLabel("EOTF:");
-  labelEOTF->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  m_comboEOTF = new QComboBox();
-  m_comboEOTF->addItem("PQ (ST.2084)");
-  m_comboEOTF->addItem("HLG");
-  m_comboEOTF->addItem("Gamma");
-  m_comboEOTF->addItem("sRGB");
-  m_comboEOTF->setToolTip("Electro-Optical Transfer Function");
-  gridLayout->addWidget(labelEOTF, 0, 0);
-  gridLayout->addWidget(m_comboEOTF, 0, 1);
-
-  // Gamma
-  m_labelGamma = new QLabel("Gamma:");
-  m_labelGamma->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  m_spinGamma = new QDoubleSpinBox();
-  m_spinGamma->setRange(1.0, 3.0);
-  m_spinGamma->setSingleStep(0.1);
-  m_spinGamma->setValue(2.2);
-  m_spinGamma->setToolTip("Pure gamma exponent. Only used when EOTF is Gamma.");
-  gridLayout->addWidget(m_labelGamma, 1, 0);
-  gridLayout->addWidget(m_spinGamma, 1, 1);
-
-  // Gamut
-  auto *labelGamut = new QLabel("Gamut:");
-  labelGamut->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  m_comboGamut = new QComboBox();
-  m_comboGamut->addItem("BT.2020");
-  m_comboGamut->addItem("BT.709");
-  m_comboGamut->addItem("DCI-P3");
-  m_comboGamut->setToolTip("Source color gamut");
-  gridLayout->addWidget(labelGamut, 2, 0);
-  gridLayout->addWidget(m_comboGamut, 2, 1);
 
   // Diffuse White
   auto *labelDiffuse = new QLabel("Diffuse White:");
@@ -146,8 +114,8 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
   m_spinDiffuseWhite->setValue(203.0);
   m_spinDiffuseWhite->setSuffix(" nits");
   m_spinDiffuseWhite->setToolTip("Reference diffuse white level in nits");
-  gridLayout->addWidget(labelDiffuse, 3, 0);
-  gridLayout->addWidget(m_spinDiffuseWhite, 3, 1);
+  gridLayout->addWidget(labelDiffuse, 0, 0);
+  gridLayout->addWidget(m_spinDiffuseWhite, 0, 1);
 
   // HDR Brightness
   auto *labelBrightness = new QLabel("Brightness:");
@@ -159,8 +127,8 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
   m_spinBrightness->setValue(1.0);
   m_spinBrightness->setSuffix("x");
   m_spinBrightness->setToolTip("Global HDR brightness scaling");
-  gridLayout->addWidget(labelBrightness, 4, 0);
-  gridLayout->addWidget(m_spinBrightness, 4, 1);
+  gridLayout->addWidget(labelBrightness, 1, 0);
+  gridLayout->addWidget(m_spinBrightness, 1, 1);
 
   mainLayout->addLayout(gridLayout);
   mainLayout->addStretch();
@@ -171,23 +139,15 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
 
   // ── Connect signals ──────────────────────────────────────────────
 
-  connect(m_comboEOTF, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &RendererSettingsDock::onEOTFChanged);
-  connect(m_comboEOTF, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &RendererSettingsDock::onAnySettingChanged);
-  connect(m_comboGamut, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &RendererSettingsDock::onAnySettingChanged);
-  connect(m_spinGamma, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-          this, &RendererSettingsDock::onAnySettingChanged);
+  connect(m_comboRenderingMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &RendererSettingsDock::onRenderingModeChanged);
   connect(m_spinDiffuseWhite, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &RendererSettingsDock::onAnySettingChanged);
   connect(m_spinBrightness, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this, &RendererSettingsDock::onAnySettingChanged);
-  connect(m_comboRenderingMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-          this, &RendererSettingsDock::onRenderingModeChanged);
   connect(m_checkDithering, &QCheckBox::toggled, this, &RendererSettingsDock::onAnySettingChanged);
 
-  onEOTFChanged(m_comboEOTF->currentIndex());
+  updateDitheringState();
 }
 
 RendererSettingsDock::~RendererSettingsDock() = default;
@@ -200,9 +160,6 @@ void RendererSettingsDock::setSplitViewWidget(splitViewWidget *splitView)
 void RendererSettingsDock::loadSettings()
 {
   QSettings settings;
-  m_comboEOTF->setCurrentIndex(settings.value("View/EDR_EOTF", 3).toInt());
-  m_comboGamut->setCurrentIndex(settings.value("View/EDR_ColorGamut", 1).toInt());
-  m_spinGamma->setValue(settings.value("View/EDR_Gamma", 2.2).toDouble());
   m_spinDiffuseWhite->setValue(settings.value("View/EDR_DiffuseWhite", 203.0).toDouble());
   m_spinBrightness->setValue(settings.value("View/EDR_Brightness", 1.0).toDouble());
   m_checkDithering->setChecked(settings.value("View/HDRDithering", false).toBool());
@@ -248,23 +205,13 @@ void RendererSettingsDock::applySettings()
     return;
 
   QSettings settings;
-  settings.setValue("View/EDR_EOTF", m_comboEOTF->currentIndex());
-  settings.setValue("View/EDR_ColorGamut", m_comboGamut->currentIndex());
-  settings.setValue("View/EDR_Gamma", m_spinGamma->value());
   settings.setValue("View/EDR_DiffuseWhite", m_spinDiffuseWhite->value());
   settings.setValue("View/EDR_Brightness", m_spinBrightness->value());
   settings.setValue("View/HDRRenderer", m_comboRenderingMode->currentIndex());
   settings.setValue("View/HDRDithering", m_checkDithering->isChecked());
 
-  // Trigger SplitViewWidget to reload all settings (HDR mode + color params)
+  // Trigger SplitViewWidget to reload all settings (HDR mode + display color params)
   m_splitView->updateSettings();
-}
-
-void RendererSettingsDock::onEOTFChanged(int index)
-{
-  bool gammaEnabled = (index == 2);
-  m_spinGamma->setEnabled(gammaEnabled);
-  m_labelGamma->setEnabled(gammaEnabled);
 }
 
 void RendererSettingsDock::onRenderingModeChanged(int)
@@ -297,21 +244,6 @@ void RendererSettingsDock::setHDRInfo(bool hdrActive, bool systemHandlesTonemapp
   else
     info = "SDR (no ACM) | App tonemapping";
   m_labelRendererInfo->setText(info);
-}
-
-video::RendererEOTF RendererSettingsDock::eotf() const
-{
-  return static_cast<video::RendererEOTF>(m_comboEOTF->currentIndex());
-}
-
-video::RendererColorGamut RendererSettingsDock::colorGamut() const
-{
-  return static_cast<video::RendererColorGamut>(m_comboGamut->currentIndex());
-}
-
-float RendererSettingsDock::gammaValue() const
-{
-  return static_cast<float>(m_spinGamma->value());
 }
 
 float RendererSettingsDock::diffuseWhiteNits() const

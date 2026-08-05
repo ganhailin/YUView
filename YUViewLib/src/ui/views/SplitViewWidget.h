@@ -314,9 +314,8 @@ protected:
   std::unique_ptr<video::OpenGLRenderer>   glRenderer;
 
   // Color processing parameters (cross-platform, used by both OpenGL and Metal paths)
-  video::RendererEOTF       m_colorEOTF{video::RendererEOTF::SRGB};
-  video::RendererColorGamut m_colorGamut{video::RendererColorGamut::BT709};
-  float                   m_colorGamma{2.2f};
+  // Note: EOTF, ColorGamut, and Gamma are now per-image (FrameHandler::SourceColorConfig).
+  // Only display-side parameters remain global here.
   float                   m_colorDiffuseWhite{203.0f};
   float                   m_colorBrightness{1.0f};
 

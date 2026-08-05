@@ -440,4 +440,248 @@ bool shouldApplySRGBOETF(const DisplayInfo &info)
   return info.outputSpace == OutputColorSpace::SRGB;
 }
 
+// ── SourceColorConfig serialization ───────────────────────────────
+
+QString SourceColorConfig::toString() const
+{
+  return QString("%1;%2;%3")
+      .arg(static_cast<int>(eotf))
+      .arg(static_cast<int>(sourceGamut))
+      .arg(gammaValue);
+}
+
+bool SourceColorConfig::fromString(const QString &str)
+{
+  const auto parts = str.split(';');
+  if (parts.size() < 2)
+    return false;
+
+  bool ok1{}, ok2{};
+  int e = parts[0].toInt(&ok1);
+  int g = parts[1].toInt(&ok2);
+  if (!ok1 || !ok2)
+    return false;
+  if (e < 0 || e > static_cast<int>(EOTF::SRGB))
+    return false;
+  if (g < 0 || g > static_cast<int>(ColorGamut::P3))
+    return false;
+
+  eotf        = static_cast<EOTF>(e);
+  sourceGamut = static_cast<ColorGamut>(g);
+  if (parts.size() >= 3)
+  {
+    bool ok3{};
+    float gv = parts[2].toFloat(&ok3);
+    if (ok3 && gv >= 1.0f && gv <= 3.0f)
+      gammaValue = gv;
+  }
+  return true;
+}
+
+// ── CPU color processing (for QPainter/Software path) ─────────────
+
+namespace {
+
+// PQ EOTF (SMPTE ST 2084)
+inline qreal pqEotf(qreal pq, qreal diffuseWhiteNits)
+{
+  const qreal m1 = 2610.0 / 4096.0 * 0.25;
+  const qreal m2 = 2523.0 / 4096.0 * 128.0;
+  const qreal c1 = 3424.0 / 4096.0;
+  const qreal c2 = 2413.0 / 4096.0 * 32.0;
+  const qreal c3 = 2392.0 / 4096.0 * 32.0;
+
+  qreal p   = std::pow(pq, 1.0 / m2);
+  qreal num = std::max(p - c1, 0.0);
+  qreal den = c2 - c3 * p;
+  qreal lin = std::pow(num / den, 1.0 / m1);
+  return lin * 10000.0 / diffuseWhiteNits;
+}
+
+// HLG EOTF (ARIB STD-B67)
+inline qreal hlgEotf(qreal hlg)
+{
+  const qreal a = 0.17883277;
+  const qreal b = 0.28466892;
+  const qreal c = 0.55991073;
+
+  qreal lin;
+  if (hlg <= 0.5)
+    lin = hlg * hlg / 3.0;
+  else
+    lin = (std::exp((hlg - c) / a) + b) / 12.0;
+  return lin * 4.0;
+}
+
+// sRGB EOTF (piecewise)
+inline qreal srgbEotf(qreal srgb)
+{
+  if (srgb <= 0.04045)
+    return srgb / 12.92;
+  return std::pow((srgb + 0.055) / 1.055, 2.4);
+}
+
+// sRGB OETF (linear -> sRGB encoded)
+inline qreal srgbOetf(qreal lin)
+{
+  if (lin <= 0.0031308)
+    return lin * 12.92;
+  return 1.055 * std::pow(lin, 1.0 / 2.4) - 0.055;
+}
+
+// Apply 3x3 matrix (row-major) to a 3-vector
+inline void applyMatrix(const float *m, qreal &r, qreal &g, qreal &b)
+{
+  qreal nr = m[0] * r + m[1] * g + m[2] * b;
+  qreal ng = m[3] * r + m[4] * g + m[5] * b;
+  qreal nb = m[6] * r + m[7] * g + m[8] * b;
+  r = nr; g = ng; b = nb;
+}
+
+inline qreal clamp01(qreal v) { return std::clamp(v, 0.0, 1.0); }
+
+} // anonymous namespace
+
+Q_DECL_UNUSED QPointF processColorCPU(qreal r, qreal g, qreal b,
+                                      const SourceColorConfig &config)
+{
+  // 1. EOTF: code value -> linear light
+  switch (config.eotf)
+  {
+    case EOTF::PQ:
+      r = pqEotf(r, 203.0);
+      g = pqEotf(g, 203.0);
+      b = pqEotf(b, 203.0);
+      break;
+    case EOTF::HLG:
+      r = hlgEotf(r);
+      g = hlgEotf(g);
+      b = hlgEotf(b);
+      break;
+    case EOTF::Gamma:
+    {
+      qreal gamma = config.gammaValue;
+      r = std::pow(r, gamma);
+      g = std::pow(g, gamma);
+      b = std::pow(b, gamma);
+      break;
+    }
+    case EOTF::SRGB:
+      r = srgbEotf(r);
+      g = srgbEotf(g);
+      b = srgbEotf(b);
+      break;
+  }
+
+  // 2. Gamut conversion: source -> BT.709
+  const float *gamutMat = getGamutMatrix(config.sourceGamut, ColorGamut::BT709);
+  applyMatrix(gamutMat, r, g, b);
+
+  // 3. Reinhard tonemapping
+  {
+    qreal lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (lum > 0.001)
+    {
+      qreal mapped = lum / (1.0 + lum);
+      qreal scale  = mapped / lum;
+      r *= scale; g *= scale; b *= scale;
+    }
+  }
+
+  // 4. sRGB OETF
+  r = srgbOetf(r);
+  g = srgbOetf(g);
+  b = srgbOetf(b);
+
+  return QPointF(clamp01(r), clamp01(g));
+}
+
+void applyColorTransformToImage(QImage &image, const SourceColorConfig &config)
+{
+  if (image.isNull())
+    return;
+
+  // Skip transform if config is sRGB + BT.709 (identity - most common SDR case)
+  if (config.eotf == EOTF::SRGB && config.sourceGamut == ColorGamut::BT709)
+    return;
+
+  // Convert to ARGB32 (not premultiplied) for safe per-pixel processing
+  if (image.format() != QImage::Format_ARGB32 &&
+      image.format() != QImage::Format_RGB32)
+  {
+    image = image.convertToFormat(QImage::Format_ARGB32);
+  }
+
+  const int w = image.width();
+  const int h = image.height();
+
+  const float *gamutMat = getGamutMatrix(config.sourceGamut, ColorGamut::BT709);
+
+  for (int y = 0; y < h; ++y)
+  {
+    QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+    for (int x = 0; x < w; ++x)
+    {
+      QRgb px = line[x];
+      qreal r = qRed(px)   / 255.0;
+      qreal g = qGreen(px) / 255.0;
+      qreal b = qBlue(px)  / 255.0;
+      int   a = qAlpha(px);
+
+      // 1. EOTF: code value -> linear light
+      switch (config.eotf)
+      {
+        case EOTF::PQ:
+          r = pqEotf(r, 203.0);
+          g = pqEotf(g, 203.0);
+          b = pqEotf(b, 203.0);
+          break;
+        case EOTF::HLG:
+          r = hlgEotf(r);
+          g = hlgEotf(g);
+          b = hlgEotf(b);
+          break;
+        case EOTF::Gamma:
+        {
+          qreal gamma = config.gammaValue;
+          r = std::pow(r, gamma);
+          g = std::pow(g, gamma);
+          b = std::pow(b, gamma);
+          break;
+        }
+        case EOTF::SRGB:
+          r = srgbEotf(r);
+          g = srgbEotf(g);
+          b = srgbEotf(b);
+          break;
+      }
+
+      // 2. Gamut conversion: source -> BT.709
+      applyMatrix(gamutMat, r, g, b);
+
+      // 3. Reinhard tonemapping
+      {
+        qreal lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        if (lum > 0.001)
+        {
+          qreal mapped = lum / (1.0 + lum);
+          qreal scale  = mapped / lum;
+          r *= scale; g *= scale; b *= scale;
+        }
+      }
+
+      // 4. sRGB OETF
+      r = srgbOetf(r);
+      g = srgbOetf(g);
+      b = srgbOetf(b);
+
+      line[x] = qRgba(
+          static_cast<int>(clamp01(r) * 255.0 + 0.5),
+          static_cast<int>(clamp01(g) * 255.0 + 0.5),
+          static_cast<int>(clamp01(b) * 255.0 + 0.5),
+          a);
+    }
+  }
+}
+
 } // namespace video::color

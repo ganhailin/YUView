@@ -36,6 +36,7 @@
 #include <QVector>
 #include <cstdint>
 #include <memory>
+#include <common/ColorPipeline.h>
 
 namespace video
 {
@@ -82,10 +83,17 @@ public:
   void clear16bitBuffer() { buffer16bit.reset(); }
   bool is16bitGenerateFrom8bit() const { return is16bitGenerateFrom8bit_; }
 
+  // Source color configuration (EOTF/Gamut/Gamma) - travels with the frame
+  // so renderers can detect when color parameters change even if pixel data
+  // is the same (e.g. user only changed EOTF without switching frames).
+  const color::SourceColorConfig &getSourceColorConfig() const { return m_sourceColorConfig; }
+  void setSourceColorConfig(const color::SourceColorConfig &config) { m_sourceColorConfig = config; }
+
 private:
   bool is16bitGenerateFrom8bit_ = false;
   std::shared_ptr<QImage>          image8bit;
   std::shared_ptr<QVector<uint16_t>> buffer16bit;
+  color::SourceColorConfig          m_sourceColorConfig;
 };
 
 } // namespace video

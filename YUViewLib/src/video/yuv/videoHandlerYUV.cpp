@@ -3284,20 +3284,16 @@ QLayout *videoHandlerYUV::createVideoHandlerControls(bool isSizeAndFormatFixed)
   // Absolutely always only call this function once!
   assert(!ui.created());
 
-  QVBoxLayout *newVBoxLayout = nullptr;
-  if (!isSizeAndFormatFixed)
-  {
-    // Our parent (videoHandler) also has controls to add. Create a new vBoxLayout and append the
-    // parent controls and our controls into that layout, separated by a line. Return that layout
-    newVBoxLayout = new QVBoxLayout;
-    newVBoxLayout->addLayout(FrameHandler::createFrameHandlerControls(false));
+  // Always create the FrameHandler controls (width/height/frame size/color config).
+  // isSizeAndFormatFixed only disables the size editing controls, not the color controls.
+  QVBoxLayout *newVBoxLayout = new QVBoxLayout;
+  newVBoxLayout->addLayout(FrameHandler::createFrameHandlerControls(isSizeAndFormatFixed));
 
-    QFrame *line = new QFrame;
-    line->setObjectName(QStringLiteral("line"));
-    line->setFrameShape(QFrame::HLine);
-    line->setFrameShadow(QFrame::Sunken);
-    newVBoxLayout->addWidget(line);
-  }
+  QFrame *line = new QFrame;
+  line->setObjectName(QStringLiteral("line"));
+  line->setFrameShape(QFrame::HLine);
+  line->setFrameShadow(QFrame::Sunken);
+  newVBoxLayout->addWidget(line);
 
   // Create the UI and setup all the controls
   ui.setupUi();
@@ -3407,10 +3403,10 @@ QLayout *videoHandlerYUV::createVideoHandlerControls(bool isSizeAndFormatFixed)
           this,
           &videoHandlerYUV::slotYUVControlChanged);
 
-  if (!isSizeAndFormatFixed && newVBoxLayout)
-    newVBoxLayout->addLayout(ui.topVBoxLayout);
+  // Always add the YUV controls to the vbox layout
+  newVBoxLayout->addLayout(ui.topVBoxLayout);
 
-  return (isSizeAndFormatFixed) ? ui.topVBoxLayout : newVBoxLayout;
+  return newVBoxLayout;
 }
 
 void videoHandlerYUV::slotYUVFormatControlChanged(int selectionIndex)

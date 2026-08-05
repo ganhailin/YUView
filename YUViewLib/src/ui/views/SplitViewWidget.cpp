@@ -152,11 +152,13 @@ void splitViewWidget::updateSettings()
   // Load color processing settings from QSettings BEFORE creating/showing HDR widgets,
   // so that the saved values are in member variables when setRendererMode
   // creates the widgets and applies settings to them.
-  m_colorEOTF = static_cast<video::RendererEOTF>(settings.value("View/EDR_EOTF", 3).toInt());
-  m_colorGamut = static_cast<video::RendererColorGamut>(settings.value("View/EDR_ColorGamut", 1).toInt());
-  m_colorGamma = settings.value("View/EDR_Gamma", 2.2f).toFloat();
   m_colorDiffuseWhite = settings.value("View/EDR_DiffuseWhite", 203.0f).toFloat();
   m_colorBrightness = settings.value("View/EDR_Brightness", 1.0f).toFloat();
+
+  // Note: EOTF, ColorGamut, and Gamma are now per-image (FrameHandler) settings.
+  // New item defaults are read from Frame/Source* keys in FrameHandler constructor.
+  // The legacy View/EDR_EOTF / View/EDR_ColorGamut / View/EDR_Gamma keys are no
+  // longer used for global renderer configuration.
 
   // Load renderer mode from settings.
   // View/HDRRenderer is a combobox index: 0=Disabled, 1=OpenGL,
@@ -210,14 +212,14 @@ void splitViewWidget::updateSettings()
 
 void splitViewWidget::applyColorSettingsToWidgets()
 {
+  // Push display-side color settings to active renderers.
+  // Source-side settings (EOTF/Gamut/Gamma) are now per-image and pushed
+  // in paintEvent from the FrameHandler's SourceColorConfig.
   QSettings settings;
   bool ditheringEnabled = settings.value("View/HDRDithering", false).toBool();
 
   if (glRenderer)
   {
-    glRenderer->setEOTF(m_colorEOTF);
-    glRenderer->setColorGamut(m_colorGamut);
-    glRenderer->setGammaValue(m_colorGamma);
     glRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
     glRenderer->setHDRBrightness(m_colorBrightness);
     glRenderer->setDithering(ditheringEnabled);
@@ -227,9 +229,6 @@ void splitViewWidget::applyColorSettingsToWidgets()
 #ifdef Q_OS_MAC
   if (edrRenderer)
   {
-    edrRenderer->setEOTF(m_colorEOTF);
-    edrRenderer->setColorGamut(m_colorGamut);
-    edrRenderer->setGammaValue(m_colorGamma);
     edrRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
     edrRenderer->setHDRBrightness(m_colorBrightness);
     edrRenderer->setPremultipliedAlpha(
@@ -239,9 +238,6 @@ void splitViewWidget::applyColorSettingsToWidgets()
 #ifdef Q_OS_WIN
   if (dxgiRenderer)
   {
-    dxgiRenderer->setEOTF(m_colorEOTF);
-    dxgiRenderer->setColorGamut(m_colorGamut);
-    dxgiRenderer->setGammaValue(m_colorGamma);
     dxgiRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
     dxgiRenderer->setHDRBrightness(m_colorBrightness);
     dxgiRenderer->setPremultipliedAlpha(
@@ -273,9 +269,6 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
       edrRenderer->setGeometry(0, 0, width(), height());
       edrRenderer->setZoom(this->zoomFactor);
       edrRenderer->setMoveOffset(this->moveOffset);
-      edrRenderer->setEOTF(m_colorEOTF);
-      edrRenderer->setColorGamut(m_colorGamut);
-      edrRenderer->setGammaValue(m_colorGamma);
       edrRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
       edrRenderer->setHDRBrightness(m_colorBrightness);
 
@@ -308,9 +301,6 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
       dxgiRenderer->setGeometry(0, 0, width(), height());
       dxgiRenderer->setZoom(this->zoomFactor);
       dxgiRenderer->setMoveOffset(this->moveOffset);
-      dxgiRenderer->setEOTF(m_colorEOTF);
-      dxgiRenderer->setColorGamut(m_colorGamut);
-      dxgiRenderer->setGammaValue(m_colorGamma);
       dxgiRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
       dxgiRenderer->setHDRBrightness(m_colorBrightness);
 
@@ -341,9 +331,6 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
       glRenderer->raise();
       glRenderer->setZoom(this->zoomFactor);
       glRenderer->setMoveOffset(this->moveOffset);
-      glRenderer->setEOTF(m_colorEOTF);
-      glRenderer->setColorGamut(m_colorGamut);
-      glRenderer->setGammaValue(m_colorGamma);
       glRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
       glRenderer->setHDRBrightness(m_colorBrightness);
 
@@ -695,6 +682,7 @@ void splitViewWidget::paintEvent(QPaintEvent *)
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
           edrRenderer->setFrame(videoFrame);
           edrRenderer->setFrameHandler(frameHandler);
+          // Source color config (EOTF/Gamut/Gamma) is carried by the VideoFrame
         }
         edrRenderer->setShowRawData(drawRawValues);
         useHDRWidget = true;
@@ -712,6 +700,7 @@ void splitViewWidget::paintEvent(QPaintEvent *)
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
           dxgiRenderer->setFrame(videoFrame);
           dxgiRenderer->setFrameHandler(frameHandler);
+          // Source color config (EOTF/Gamut/Gamma) is carried by the VideoFrame
         }
         dxgiRenderer->setShowRawData(drawRawValues);
         useHDRWidget = true;
@@ -739,9 +728,11 @@ void splitViewWidget::paintEvent(QPaintEvent *)
       // Translate the painter to the position where we want the item to be
       painter.translate(centerPoints[0] + offset);
 
-      // Draw the item at position (0,0) - only if not using renderer
-      bool hdrActive = (rendererMode != RendererMode::Software) && useHDRWidget;
-      if (!waitingForCaching && !hdrActive)
+      // Always call drawItem to update currentImage (videoHandler::drawFrame loads
+      // the correct frame from cache into currentImage). In HDR/OpenGL mode the
+      // renderer widget covers the painter output, so the drawItem paint is not
+      // visible but the side effect (currentImage update) is needed by the renderer.
+      if (!waitingForCaching)
       {
         painter.setFont(
             QFont(SPLITVIEWWIDGET_PIXEL_VALUES_FONT, SPLITVIEWWIDGET_PIXEL_VALUES_FONTSIZE));

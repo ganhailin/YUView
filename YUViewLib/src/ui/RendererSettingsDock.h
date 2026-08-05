@@ -58,9 +58,6 @@ public:
   void setSplitViewWidget(splitViewWidget *splitView);
 
   // Get current values
-  video::RendererEOTF eotf() const;
-  video::RendererColorGamut colorGamut() const;
-  float gammaValue() const;
   float diffuseWhiteNits() const;
   float hdrBrightness() const;
   bool ditheringEnabled() const;
@@ -73,7 +70,6 @@ signals:
   void settingsChanged();
 
 private slots:
-  void onEOTFChanged(int index);
   void onRenderingModeChanged(int index);
   void onAnySettingChanged();
 
@@ -83,14 +79,10 @@ private:
   void updateDitheringState();
 
   QComboBox      *m_comboRenderingMode{};
-  QComboBox      *m_comboEOTF{};
-  QComboBox      *m_comboGamut{};
-  QDoubleSpinBox *m_spinGamma{};
   QDoubleSpinBox *m_spinDiffuseWhite{};
   QDoubleSpinBox *m_spinBrightness{};
   QCheckBox      *m_checkDithering{};
   QLabel         *m_labelRendererInfo{};
-  QLabel         *m_labelGamma{};
 
   splitViewWidget *m_splitView{};
 };

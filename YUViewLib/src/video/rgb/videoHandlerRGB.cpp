@@ -250,20 +250,16 @@ QLayout *videoHandlerRGB::createVideoHandlerControls(bool isSizeFixed)
   // Absolutely always only call this function once!
   assert(!ui.created());
 
-  QVBoxLayout *newVBoxLayout = nullptr;
-  if (!isSizeFixed)
-  {
-    // Our parent (FrameHandler) also has controls to add. Create a new vBoxLayout and append the
-    // parent controls and our controls into that layout, separated by a line. Return that layout
-    newVBoxLayout = new QVBoxLayout;
-    newVBoxLayout->addLayout(FrameHandler::createFrameHandlerControls(isSizeFixed));
+  // Always create the FrameHandler controls (width/height/frame size/color config).
+  // isSizeFixed only disables the size editing controls, not the color controls.
+  QVBoxLayout *newVBoxLayout = new QVBoxLayout;
+  newVBoxLayout->addLayout(FrameHandler::createFrameHandlerControls(isSizeFixed));
 
-    QFrame *line = new QFrame;
-    line->setObjectName(QStringLiteral("line"));
-    line->setFrameShape(QFrame::HLine);
-    line->setFrameShadow(QFrame::Sunken);
-    newVBoxLayout->addWidget(line);
-  }
+  QFrame *line = new QFrame;
+  line->setObjectName(QStringLiteral("line"));
+  line->setFrameShape(QFrame::HLine);
+  line->setFrameShadow(QFrame::Sunken);
+  newVBoxLayout->addWidget(line);
 
   ui.setupUi();
 
@@ -322,13 +318,10 @@ QLayout *videoHandlerRGB::createVideoHandlerControls(bool isSizeFixed)
 
   this->updateControlsForNewPixelFormat();
 
-  if (!isSizeFixed && newVBoxLayout)
-    newVBoxLayout->addLayout(ui.topVerticalLayout);
+  // Always add the RGB controls to the vbox layout
+  newVBoxLayout->addLayout(ui.topVerticalLayout);
 
-  if (isSizeFixed)
-    return ui.topVerticalLayout;
-  else
-    return newVBoxLayout;
+  return newVBoxLayout;
 }
 
 void videoHandlerRGB::slotDisplayOptionsChanged()

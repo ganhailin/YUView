@@ -72,6 +72,12 @@ public:
   // The signal signalHandlerChanged will be emitted if a redraw is required.
   void setInputVideo(FrameHandler *childVideo);
 
+  // Override: disable source color controls (inherited from child item)
+  virtual QLayout *createFrameHandlerControls(bool isSizeFixed = false) override;
+
+  // Return the source color config of the child item (read-only)
+  const color::SourceColorConfig &getSourceColorConfig() const override;
+
   void setScaledSize(Size scaledSize);
   void setInterpolation(Interpolation interpolation);
   void setCutAndSample(indexRange startEnd, int sampling);

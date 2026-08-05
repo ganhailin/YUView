@@ -34,6 +34,8 @@
 
 #include "playlistitem/playlistItem.h"
 
+#include <QScrollArea>
+
 /* The file info group box can display information on a file (or any other display object).
  * If you provide a list of QString tuples, this class will fill a grid layout with the
  * corresponding labels.
@@ -64,12 +66,30 @@ void PropertiesWidget::currentSelectedItemsChanged(playlistItem *item1, playlist
     // Show the properties widget of the first selection
     QWidget *propertiesWidget = item1->getPropertiesWidget();
 
-    if (stack.indexOf(propertiesWidget) == -1)
-      // The properties widget was just created and is not in the stack yet.
-      stack.addWidget(propertiesWidget);
+    // Check if we already have a scroll area wrapping this properties widget
+    QScrollArea *existingScroll = nullptr;
+    for (int i = 0; i < stack.count(); ++i)
+    {
+      auto *sa = qobject_cast<QScrollArea *>(stack.widget(i));
+      if (sa && sa->widget() == propertiesWidget)
+      {
+        existingScroll = sa;
+        break;
+      }
+    }
 
-    // Show the properties widget
-    stack.setCurrentWidget(propertiesWidget);
+    if (!existingScroll)
+    {
+      // First time: wrap the properties widget in a scroll area
+      auto *scrollArea = new QScrollArea;
+      scrollArea->setWidget(propertiesWidget);
+      scrollArea->setWidgetResizable(true);
+      scrollArea->setFrameShape(QFrame::NoFrame);
+      stack.addWidget(scrollArea);
+      existingScroll = scrollArea;
+    }
+
+    stack.setCurrentWidget(existingScroll);
   }
   else
   {
@@ -82,10 +102,18 @@ void PropertiesWidget::itemAboutToBeDeleted(playlistItem *item)
 {
   if (item->propertiesWidgetCreated())
   {
-    // The properties widget for the item was created and it should be in the widget stack.
-    // Remove it from the stack but don't delete it. The playlistItem itself will take care of that.
     QWidget *w = item->getPropertiesWidget();
-    assert(stack.indexOf(w) != -1);
-    stack.removeWidget(w);
+    // Find the scroll area that wraps this properties widget
+    for (int i = 0; i < stack.count(); ++i)
+    {
+      auto *sa = qobject_cast<QScrollArea *>(stack.widget(i));
+      if (sa && sa->widget() == w)
+      {
+        sa->takeWidget(); // Release ownership so playlistItem can delete it
+        stack.removeWidget(sa);
+        delete sa;
+        break;
+      }
+    }
   }
 }

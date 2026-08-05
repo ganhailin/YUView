@@ -62,6 +62,12 @@ public:
   // Create the YUV controls and return a pointer to the layout.
   virtual QLayout *createDifferenceHandlerControls();
 
+  // Override: disable source color controls (inherited from child items)
+  virtual QLayout *createFrameHandlerControls(bool isSizeFixed = false) override;
+
+  // Return the source color config of the first child item (read-only)
+  const color::SourceColorConfig &getSourceColorConfig() const override;
+
   // Set the two video inputs. This will also update the number frames, the controls and the frame
   // size. The signal signalHandlerChanged will be emitted if a redraw is required.
   void setInputVideos(FrameHandler *childVideo0, FrameHandler *childVideo1);

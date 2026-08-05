@@ -143,6 +143,22 @@ void videoHandlerResample::setInputVideo(FrameHandler *childVideo)
   emit signalHandlerChanged(true, RECACHE_NONE);
 }
 
+QLayout *videoHandlerResample::createFrameHandlerControls(bool isSizeFixed)
+{
+  auto *layout = FrameHandler::createFrameHandlerControls(isSizeFixed);
+  // Color controls are read-only for resample (inherited from child item)
+  disableSourceColorControls();
+  return layout;
+}
+
+const color::SourceColorConfig &videoHandlerResample::getSourceColorConfig() const
+{
+  // Return the config of the child item if available
+  if (inputVideo)
+    return inputVideo->getSourceColorConfig();
+  return m_sourceColorConfig;
+}
+
 void videoHandlerResample::setScaledSize(Size scaledSize)
 {
   if (!scaledSize.isValid())

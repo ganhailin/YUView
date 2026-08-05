@@ -72,6 +72,13 @@ void videoHandler::slotVideoControlChanged()
     return;
   }
 
+  // Check if source color controls (EOTF/Gamut/Gamma) changed
+  if (checkSourceColorChanged())
+  {
+    emit signalHandlerChanged(true, RECACHE_NONE);
+    return;
+  }
+
   // Update the controls and get the new selected size
   auto newSize = getNewSizeFromControls();
 

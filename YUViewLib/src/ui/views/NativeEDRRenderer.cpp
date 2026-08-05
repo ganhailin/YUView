@@ -151,14 +151,24 @@ void NativeEDRRenderer::setFrame(const VideoFrame &frame)
   auto old_empty = m_frameSize.isEmpty();
   std::shared_ptr<QImage> newImage8 = frame.getImage8bit();
   std::shared_ptr<QImage> oldImage8 = m_currentFrame.getImage8bit();
+  bool colorConfigChanged = (frame.getSourceColorConfig() != m_currentFrame.getSourceColorConfig());
   if (newData != oldData || (new_empty != old_empty && (frame.getSize() != m_frameSize)) ||
-      newImage8 != oldImage8)
+      newImage8 != oldImage8 || colorConfigChanged)
   {
     m_currentFrame = frame;
     if (!newData)
       m_currentFrame.clear16bitBuffer();
     m_frameSize = frame.getSize();
     m_frameNeedsUpdate = true;
+
+    // Update Metal renderer's color parameters from the frame's SourceColorConfig
+    if (m_renderer)
+    {
+      const auto &scc = m_currentFrame.getSourceColorConfig();
+      m_renderer->setEOTF(scc.eotf);
+      m_renderer->setColorGamut(scc.sourceGamut);
+      m_renderer->setGammaValue(scc.gammaValue);
+    }
 
     // Render immediately if initialized
     if (m_initialized && m_renderer)

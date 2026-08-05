@@ -86,6 +86,28 @@ struct ColorConfig
   bool       ditheringEnabled{false};   // Bayer 4×4 dithering (OpenGL only)
 };
 
+/// Source color configuration that travels with an image/frame rather
+/// than the renderer.  These values describe how the pixel code values
+/// were encoded (transfer function + primaries + gamma exponent) and are
+/// independent of the display or rendering backend.
+struct SourceColorConfig
+{
+  EOTF       eotf{EOTF::SRGB};
+  ColorGamut sourceGamut{ColorGamut::BT709};
+  float      gammaValue{2.2f};
+
+  bool operator==(const SourceColorConfig &o) const
+  {
+    return eotf == o.eotf && sourceGamut == o.sourceGamut && gammaValue == o.gammaValue;
+  }
+  bool operator!=(const SourceColorConfig &o) const { return !(*this == o); }
+
+  /// Serialize to a compact string (e.g. "3;1;2.2") for playlist persistence.
+  QString toString() const;
+  /// Deserialize from the string produced by toString(). Returns true on success.
+  bool fromString(const QString &str);
+};
+
 // ── Gamut matrix lookup ───────────────────────────────────────────
 
 /// Get a 3×3 gamut conversion matrix (row-major, 9 floats).
@@ -110,5 +132,24 @@ bool shouldApplyTonemapping(const DisplayInfo &info);
 /// Returns true if the backend should apply sRGB OETF after color processing.
 /// Only OpenGL (SRGB output) needs this — scRGB and EDR outputs are linear.
 bool shouldApplySRGBOETF(const DisplayInfo &info);
+// ── CPU color processing (for QPainter/Software path) ────────────
 
+/// Process a single pixel through the full color pipeline on the CPU.
+/// Mirrors the GLSL/HLSL/MSL `processColor()` function:
+///   1. EOTF (PQ/HLG/Gamma/sRGB) -> linear light
+///   2. Gamut conversion (sourceGamut -> BT.709)
+///   3. Reinhard tonemapping (always for SDR Software path)
+///   4. sRGB OETF (linear -> sRGB encoded)
+///
+/// @param rgb     Input pixel, each channel in [0, 1]
+/// @param config  Source color configuration (EOTF, gamut, gamma)
+/// @return        Processed pixel, each channel in [0, 1], sRGB-encoded
+Q_DECL_UNUSED QPointF processColorCPU(qreal r, qreal g, qreal b,
+                                      const SourceColorConfig &config);
+
+/// Convert an entire QImage in-place through the Software color pipeline.
+/// Applies EOTF -> gamut conversion -> Reinhard tonemapping -> sRGB OETF.
+/// @param image   The image to transform (8-bit ARGB). Modified in-place.
+/// @param config  Source color configuration
+void applyColorTransformToImage(QImage &image, const SourceColorConfig &config);
 } // namespace video::color

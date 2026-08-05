@@ -39,6 +39,7 @@
 #include <QSurfaceFormat>
 
 #include <common/FunctionsGui.h>
+#include <common/ColorPipeline.h>
 #include <decoder/decoderTarga.h>
 #include <playlistitem/playlistItem.h>
 
@@ -118,6 +119,14 @@ FrameHandler::frameSizePresetList FrameHandler::presetFrameSizes;
 
 FrameHandler::FrameHandler()
 {
+  // Load default source color config from settings (per-image default)
+  QSettings s;
+  m_sourceColorConfig.eotf = static_cast<color::EOTF>(
+      s.value("Frame/SourceEOTF", static_cast<int>(color::EOTF::SRGB)).toInt());
+  m_sourceColorConfig.sourceGamut = static_cast<color::ColorGamut>(
+      s.value("Frame/SourceGamut", static_cast<int>(color::ColorGamut::BT709)).toInt());
+  m_sourceColorConfig.gammaValue =
+      s.value("Frame/SourceGamma", 2.2).toFloat();
 }
 
 QLayout *FrameHandler::createFrameHandlerControls(bool isSizeFixed)
@@ -150,6 +159,23 @@ QLayout *FrameHandler::createFrameHandlerControls(bool isSizeFixed)
   ui.afbcLayoutComboBox->addItems(functions::toQStringList(AFBCLayoutMapper.getNames()));
   ui.afbcLayoutComboBox->setCurrentIndex(int(AFBCLayoutMapper.indexOf(this->afbcLayout)));
   updateAfbcOptionWidgetsEnabled();
+
+  // ── Source color controls ────────────────────────────────────
+  ui.eotfComboBox->addItem("PQ (ST.2084)");   // 0
+  ui.eotfComboBox->addItem("HLG");             // 1
+  ui.eotfComboBox->addItem("Gamma");           // 2
+  ui.eotfComboBox->addItem("sRGB");            // 3
+  ui.eotfComboBox->setCurrentIndex(static_cast<int>(m_sourceColorConfig.eotf));
+
+  ui.gamutComboBox->addItem("BT.2020");       // 0
+  ui.gamutComboBox->addItem("BT.709");         // 1
+  ui.gamutComboBox->addItem("DCI-P3");         // 2
+  ui.gamutComboBox->setCurrentIndex(static_cast<int>(m_sourceColorConfig.sourceGamut));
+
+  ui.gammaSpinBox->setRange(1.0, 3.0);
+  ui.gammaSpinBox->setSingleStep(0.1);
+  ui.gammaSpinBox->setValue(m_sourceColorConfig.gammaValue);
+  updateColorControlsEnabled();
 
   // Connect all the change signals from the controls to "connectWidgetSignals()"
   connect(ui.widthSpinBox,
@@ -186,6 +212,20 @@ QLayout *FrameHandler::createFrameHandlerControls(bool isSizeFixed)
           &FrameHandler::slotVideoControlChanged);
   connect(ui.afbcLayoutComboBox,
           QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this,
+          &FrameHandler::slotVideoControlChanged);
+
+  // Source color control signals
+  connect(ui.eotfComboBox,
+          QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.gamutComboBox,
+          QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this,
+          &FrameHandler::slotVideoControlChanged);
+  connect(ui.gammaSpinBox,
+          QOverload<double>::of(&QDoubleSpinBox::valueChanged),
           this,
           &FrameHandler::slotVideoControlChanged);
 
@@ -266,6 +306,8 @@ void FrameHandler::savePlaylist(YUViewDomElement &element) const
   element.appendProperiteChild("afbcYoffset", QString::number(this->afbcYoffset));
   element.appendProperiteChild("afbcLayout",
                                QString::fromStdString(std::string(AFBCLayoutMapper.getName(this->afbcLayout))));
+  // Source color configuration (per-image)
+  element.appendProperiteChild("sourceColorConfig", m_sourceColorConfig.toString());
 }
 
 void FrameHandler::loadPlaylist(const YUViewDomElement &root)
@@ -303,6 +345,11 @@ void FrameHandler::loadPlaylist(const YUViewDomElement &root)
   if (!afbcLayoutName.isEmpty())
     if (auto newLayout = AFBCLayoutMapper.getValue(afbcLayoutName.toStdString()))
       this->afbcLayout = *newLayout;
+
+  // Source color configuration (per-image) - backward compatible: defaults if absent
+  auto sccStr = root.findChildValue("sourceColorConfig");
+  if (!sccStr.isEmpty())
+    m_sourceColorConfig.fromString(sccStr);
 }
 
 void FrameHandler::slotVideoControlChanged()
@@ -311,6 +358,9 @@ void FrameHandler::slotVideoControlChanged()
     return;
 
   if (checkAfbcOptionsChanged())
+    return;
+
+  if (checkSourceColorChanged())
     return;
 
   // Update the controls and get the new selected size
@@ -325,6 +375,87 @@ void FrameHandler::slotVideoControlChanged()
     // The frame size changed. We need to redraw/re-cache.
     emit signalHandlerChanged(true, RECACHE_CLEAR);
   }
+}
+
+void FrameHandler::setSourceColorConfig(const color::SourceColorConfig &config)
+{
+  if (m_sourceColorConfig != config)
+  {
+    m_sourceColorConfig = config;
+    // Update UI controls if they exist
+    if (ui.created())
+    {
+      ui.eotfComboBox->setCurrentIndex(static_cast<int>(config.eotf));
+      ui.gamutComboBox->setCurrentIndex(static_cast<int>(config.sourceGamut));
+      ui.gammaSpinBox->setValue(config.gammaValue);
+      updateColorControlsEnabled();
+    }
+    emit signalHandlerChanged(true, RECACHE_NONE);
+  }
+}
+
+void FrameHandler::updateColorControlsEnabled()
+{
+  if (!ui.created())
+    return;
+  // Gamma spin box is only relevant when EOTF == Gamma
+  bool gammaEnabled = (m_sourceColorConfig.eotf == color::EOTF::Gamma);
+  ui.gammaSpinBox->setEnabled(gammaEnabled);
+  ui.labelGamma->setEnabled(gammaEnabled);
+}
+
+void FrameHandler::disableSourceColorControls()
+{
+  if (!ui.created())
+    return;
+  ui.eotfComboBox->setEnabled(false);
+  ui.gamutComboBox->setEnabled(false);
+  ui.gammaSpinBox->setEnabled(false);
+  ui.labelEOTF->setEnabled(false);
+  ui.labelGamut->setEnabled(false);
+  ui.labelGamma->setEnabled(false);
+  ui.labelColorSection->setEnabled(false);
+}
+
+bool FrameHandler::checkSourceColorChanged()
+{
+  auto sender = QObject::sender();
+
+  if (sender == ui.eotfComboBox)
+  {
+    auto newEotf = static_cast<color::EOTF>(ui.eotfComboBox->currentIndex());
+    if (newEotf != m_sourceColorConfig.eotf)
+    {
+      m_sourceColorConfig.eotf = newEotf;
+      updateColorControlsEnabled();
+      return true;
+    }
+    return true;
+  }
+
+  if (sender == ui.gamutComboBox)
+  {
+    auto newGamut = static_cast<color::ColorGamut>(ui.gamutComboBox->currentIndex());
+    if (newGamut != m_sourceColorConfig.sourceGamut)
+    {
+      m_sourceColorConfig.sourceGamut = newGamut;
+      return true;
+    }
+    return true;
+  }
+
+  if (sender == ui.gammaSpinBox)
+  {
+    auto newGamma = static_cast<float>(ui.gammaSpinBox->value());
+    if (newGamma != m_sourceColorConfig.gammaValue)
+    {
+      m_sourceColorConfig.gammaValue = newGamma;
+      return true;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 bool FrameHandler::checkFbcFormatChanged()
@@ -473,6 +604,11 @@ void FrameHandler::drawFrame(QPainter *painter, double zoomFactor, bool drawRawV
   // QImage's sRGB-encoded values are drawn directly — no conversion needed.
   QImage imgToDraw = currentImage;
 
+  // Apply source color processing (EOTF -> gamut -> tonemap -> sRGB OETF)
+  // for the Software/QPainter path. This mirrors what the OpenGL/DXGI/EDR
+  // shaders do. Skip for the identity case (sRGB + BT.709) for performance.
+  color::applyColorTransformToImage(imgToDraw, m_sourceColorConfig);
+
   const bool surfaceIsSRGB =
       (QSurfaceFormat::defaultFormat().colorSpace() == QColorSpace::SRgb);
   if (!surfaceIsSRGB)
@@ -516,12 +652,12 @@ void FrameHandler::drawFrame(QPainter *painter, double zoomFactor, bool drawRawV
 
 VideoFrame FrameHandler::getCurrentFrameAsVideoFrame() const
 {
-  // If we have a cached VideoFrame, return it
-  if (currentVideoFrame.isValid())
-    return currentVideoFrame;
-
-  // Otherwise, create a VideoFrame from the current QImage
+  // Always rebuild from currentImage. QImage is implicitly shared so this is cheap
+  // (no pixel data copy). The previous caching caused stale frames in the OpenGL
+  // renderer because QImage::cacheKey() doesn't change when currentImage is
+  // reassigned to a different cache entry that shares the same underlying data.
   currentVideoFrame = VideoFrame(currentImage);
+  currentVideoFrame.setSourceColorConfig(getSourceColorConfig());
   return currentVideoFrame;
 }
 

@@ -409,8 +409,10 @@ void NativeDXGIRenderer::setFrame(const VideoFrame &frame)
       m_currentFrame.is16bitGenerateFrom8bit() ? nullptr : m_currentFrame.getData16bit();
   std::shared_ptr<QImage> newImage8 = frame.getImage8bit();
   std::shared_ptr<QImage> oldImage8 = m_currentFrame.getImage8bit();
+  bool colorConfigChanged = (frame.getSourceColorConfig() != m_currentFrame.getSourceColorConfig());
 
-  if (newData != oldData || frame.getSize() != m_frameSize || newImage8 != oldImage8)
+  if (newData != oldData || frame.getSize() != m_frameSize || newImage8 != oldImage8 ||
+      colorConfigChanged)
   {
     m_currentFrame     = frame;
     if (!newData)
@@ -769,9 +771,12 @@ void NativeDXGIRenderer::render()
 
   // ── Update pixel shader constant buffer (register b0) ────────────
 
+  // EOTF/Gamut/Gamma come from the frame's SourceColorConfig (per-image)
+  const auto &scc = m_currentFrame.getSourceColorConfig();
+
   ConstantBuffer cb{};
-  cb.eotf                     = static_cast<int>(m_eotf);
-  cb.gammaValue               = m_gammaValue;
+  cb.eotf                     = static_cast<int>(scc.eotf);
+  cb.gammaValue               = scc.gammaValue;
   cb.diffuseWhiteNits         = m_diffuseWhiteNits;
   cb.hdrBrightness            = m_hdrBrightness;
   cb.sdrWhiteNits             = caps.sdrWhiteNits;
@@ -780,7 +785,7 @@ void NativeDXGIRenderer::render()
   //   1. The system is NOT handling tonemapping (SDR without ACM), AND
   //   2. The content is HDR (PQ/HLG) — linear light may exceed 1.0 and needs compression.
   // SDR content (sRGB/Gamma) has linear values already in 0-1 range, so skip Reinhard.
-  bool isHDREOTF = (m_eotf == video::RendererEOTF::PQ || m_eotf == video::RendererEOTF::HLG);
+  bool isHDREOTF = (scc.eotf == video::RendererEOTF::PQ || scc.eotf == video::RendererEOTF::HLG);
   cb.systemHandlesTonemapping = (caps.systemHandlesTonemapping || !isHDREOTF) ? 1.0f : 0.0f;
   cb.debugOutput              = m_debugOutput;
   cb.premultipliedAlpha       = m_premultipliedAlpha ? 1 : 0;
@@ -792,18 +797,18 @@ void NativeDXGIRenderer::render()
   const float *gamutMat;
   if (caps.systemHandlesTonemapping)
   {
-    gamutMat = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+    gamutMat = color::getGamutMatrix(scc.sourceGamut, color::ColorGamut::BT709);
   }
   else
   {
     auto displayCS = functionsGui::getDisplayColorSpace();
     if (displayCS.isValid())
     {
-      gamutMat = color::getGamutMatrixForDisplay(m_colorGamut, displayCS, customMatrix);
+      gamutMat = color::getGamutMatrixForDisplay(scc.sourceGamut, displayCS, customMatrix);
     }
     else
     {
-      gamutMat = color::getGamutMatrix(m_colorGamut, color::ColorGamut::BT709);
+      gamutMat = color::getGamutMatrix(scc.sourceGamut, color::ColorGamut::BT709);
     }
   }
   float packedMatrix[12];

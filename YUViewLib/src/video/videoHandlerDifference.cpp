@@ -222,6 +222,22 @@ QLayout *videoHandlerDifference::createDifferenceHandlerControls()
   return ui.topVBoxLayout;
 }
 
+QLayout *videoHandlerDifference::createFrameHandlerControls(bool isSizeFixed)
+{
+  auto *layout = FrameHandler::createFrameHandlerControls(isSizeFixed);
+  // Color controls are read-only for difference (inherited from child items)
+  disableSourceColorControls();
+  return layout;
+}
+
+const color::SourceColorConfig &videoHandlerDifference::getSourceColorConfig() const
+{
+  // Return the config of the first child item if available
+  if (inputVideo[0])
+    return inputVideo[0]->getSourceColorConfig();
+  return m_sourceColorConfig;
+}
+
 void videoHandlerDifference::slotDifferenceControlChanged()
 {
   // The control that caused the slot to be called
