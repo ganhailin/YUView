@@ -546,6 +546,17 @@ bool FrameHandler::checkAfbcOptionsChanged()
 void FrameHandler::updateAfbcOptionWidgetsEnabled()
 {
   bool afbcActive = (this->fbcFormat != FBCFormat::Raster);
+
+  // Collapse AFBC detail controls when FBC is not AFBC
+  ui.afbcCustomOptionsCheckBox->setVisible(afbcActive);
+  ui.afbcYuvTfCheckBox->setVisible(afbcActive);
+  ui.afbcSplitModeCheckBox->setVisible(afbcActive);
+  ui.labelAfbcYoffset->setVisible(afbcActive);
+  ui.afbcYoffsetSpinBox->setVisible(afbcActive);
+  ui.labelAfbcLayout->setVisible(afbcActive);
+  ui.afbcLayoutComboBox->setVisible(afbcActive);
+
+  // Enable state: custom options only when AFBC is active
   ui.afbcCustomOptionsCheckBox->setEnabled(afbcActive);
   bool customEnabled = afbcActive && this->afbcCustomOptions;
   ui.afbcYuvTfCheckBox->setEnabled(customEnabled);

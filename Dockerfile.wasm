@@ -1,0 +1,35 @@
+FROM anaselgarhy/qt-wasm-builder:multithread
+
+# Install host Qt6 tools (qmake, moc, uic, rcc, ...)
+# The wasm Qt cross-compilation requires host tools on the host arch.
+RUN apk update && apk add --no-cache \
+    qt6-qtbase-dev \
+    qt6-qttools-dev
+
+# The wasm qmake scripts at /opt/Qt/6.11.1/wasm_multithread/bin/qmake
+# (and qmake6) are wrappers that call the official Qt6 host qmake with
+# -qtconf target_qt.conf. Alpine's qmake6 doesn't support TargetSpec
+# in qt.conf, so we replace the wrappers to pass -spec explicitly.
+# We also need to symlink host tools (moc, uic, rcc) to the path
+# expected by target_qt.conf (HostPrefix=../../gcc_64 -> libexec/).
+RUN rm -f /opt/Qt/6.11.1/wasm_multithread/bin/qmake \
+         /opt/Qt/6.11.1/wasm_multithread/bin/qmake6 && \
+    { echo '#!/bin/sh'; \
+      echo 'script_dir_path=$(dirname $0)'; \
+      echo 'script_dir_path=$(cd "$script_dir_path"; pwd)'; \
+      echo 'exec /usr/lib/qt6/bin/qmake6 \'; \
+      echo '  -spec "${script_dir_path}/../mkspecs/wasm-emscripten" \'; \
+      echo '  -qtconf "${script_dir_path}/target_qt.conf" "$@"'; \
+    } > /opt/Qt/6.11.1/wasm_multithread/bin/qmake && \
+    chmod +x /opt/Qt/6.11.1/wasm_multithread/bin/qmake && \
+    ln -s /opt/Qt/6.11.1/wasm_multithread/bin/qmake \
+          /opt/Qt/6.11.1/wasm_multithread/bin/qmake6 && \
+    # Symlink host tools (moc, uic, rcc) to where target_qt.conf expects them
+    mkdir -p /opt/Qt/6.11.1/gcc_64/libexec /opt/Qt/6.11.1/gcc_64/bin && \
+    for tool in moc uic rcc; do \
+      ln -sf /usr/lib/qt6/libexec/$tool /opt/Qt/6.11.1/gcc_64/libexec/$tool; \
+    done && \
+    ln -sf /usr/lib/qt6/bin/qmake6 /opt/Qt/6.11.1/gcc_64/bin/qmake6
+
+# Default working directory
+WORKDIR /app

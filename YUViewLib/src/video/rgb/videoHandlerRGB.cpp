@@ -410,9 +410,41 @@ void videoHandlerRGB::slotRGBFormatControlChanged(int selectionIndex)
   {
     DEBUG_RGB("videoHandlerRGB::slotRGBFormatControlChanged custom format");
 
+#ifdef Q_OS_WASM
+    auto *dialog = new videoHandlerRGBCustomFormatDialog(this->srcPixelFormat);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    QObject::connect(dialog, &QDialog::accepted, dialog, [this, dialog]() {
+      auto fmt = dialog->getSelectedRGBFormat();
+      if (fmt.isValid() && fmt != this->srcPixelFormat) {
+        this->setSrcPixelFormat(fmt);
+        // Also update the combo box to reflect the new format
+        if (this->ui.created()) {
+          const auto isInPresetList = vectorContains(videoHandlerRGB::formatPresetList, fmt);
+          if (!isInPresetList) {
+            videoHandlerRGB::formatPresetList.push_back(fmt);
+            const QSignalBlocker blocker(this->ui.rgbFormatComboBox);
+            this->ui.rgbFormatComboBox->insertItem(
+                this->ui.rgbFormatComboBox->count() - 1,
+                QString::fromStdString(fmt.getName()));
+          }
+          if (const auto idx = vectorIndexOf(videoHandlerRGB::formatPresetList, fmt)) {
+            const QSignalBlocker blocker(this->ui.rgbFormatComboBox);
+            this->ui.rgbFormatComboBox->setCurrentIndex(static_cast<int>(*idx));
+          }
+        }
+        // Trigger redraw
+        this->currentImageIndex = -1;
+        this->setCacheInvalid();
+        emit signalHandlerChanged(true, RECACHE_CLEAR);
+      }
+    });
+    dialog->open();
+    return;
+#else
     videoHandlerRGBCustomFormatDialog dialog(this->srcPixelFormat);
     if (dialog.exec() == QDialog::Accepted && dialog.getSelectedRGBFormat().isValid())
       this->srcPixelFormat = dialog.getSelectedRGBFormat();
+#endif
 
     const auto isInPresetList =
         vectorContains(videoHandlerRGB::formatPresetList, this->srcPixelFormat);
@@ -483,6 +515,7 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     }
     else
     {
+#ifndef Q_OS_WASM
       // Write raw AFBC data to a temp file (auto-removed when tempIn goes out of scope)
       QTemporaryFile tempIn(QDir::temp().filePath("afbc_XXXXXX.raw"));
       tempIn.open();
@@ -558,6 +591,10 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
       if(this->currentFrameRawData.size() < old_size){
         this->currentFrameRawData.resize(old_size);
       }
+#else
+      Q_UNUSED(afbcDecoderPath);
+      qDebug() << "[AFBC] AFBC decoding via external process is not supported on WebAssembly.";
+#endif
     }
   }
 

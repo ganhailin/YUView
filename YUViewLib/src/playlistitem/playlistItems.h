@@ -37,6 +37,8 @@
 #include <QStringList>
 #include <QWidget>
 
+#include <functional>
+
 #include "playlistItem.h"
 
 /* This namespace contains all functions that are needed for creation of playlist Items. This way,
@@ -54,6 +56,12 @@ QStringList getSupportedNameFilters();
 
 // When given a file, this function will create the correct playlist item
 playlistItem *createPlaylistItemFromFile(QWidget *parent, const QString &fileName);
+
+#ifdef Q_OS_WASM
+// Async version for Wasm: avoids QInputDialog::getItem() which uses exec()
+void createPlaylistItemFromFileAsync(QWidget *parent, const QString &fileName,
+                                     std::function<void(playlistItem *)> callback);
+#endif
 
 // Load a playlist item (and all of it's children) from the playlist.
 playlistItem *loadPlaylistItem(const QDomElement &elem, const QString &filePath);

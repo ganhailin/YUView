@@ -2804,8 +2804,9 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
   auto platformImageFormat = functionsGui::platformImageFormat(yuvFormat.hasAlpha());
   if (is_Q_OS_WIN || is_Q_OS_MAC)
     outputImage = QImage(qFrameSize, platformImageFormat);
-  else if (is_Q_OS_LINUX)
+  else
   {
+    // Linux / Wasm / other: ensure we use a valid 32-bit format
     if (platformImageFormat == QImage::Format_ARGB32_Premultiplied ||
         platformImageFormat == QImage::Format_ARGB32)
       outputImage = QImage(qFrameSize, platformImageFormat);
@@ -2882,9 +2883,9 @@ void convertYUVToImage(const QByteArray         &sourceBuffer,
 
   assert(convOK);
 
-  if (is_Q_OS_LINUX)
+  if (is_Q_OS_LINUX || is_Q_OS_WASM)
   {
-    // On linux, we may have to convert the image to the platform image format if it is not one of
+    // On linux/wasm, we may have to convert the image to the platform image format if it is not one of
     // the RGBA formats.
     auto format = functionsGui::platformImageFormat(yuvFormat.hasAlpha());
     if (format != QImage::Format_ARGB32_Premultiplied && format != QImage::Format_ARGB32 &&
@@ -3417,9 +3418,37 @@ void videoHandlerYUV::slotYUVFormatControlChanged(int selectionIndex)
       (selectionIndex == static_cast<int>(videoHandlerYUV::formatPresetList.size()));
   if (customFormatSelected)
   {
+#ifdef Q_OS_WASM
+    auto *dialog = new videoHandlerYUVCustomFormatDialog(srcPixelFormat);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    QObject::connect(dialog, &QDialog::accepted, dialog, [this, dialog]() {
+      auto fmt = dialog->getSelectedYUVFormat();
+      if (fmt.isValid() && fmt != this->srcPixelFormat) {
+        this->setSrcPixelFormat(fmt, true);
+        // Also update the combo box to reflect the new format
+        if (this->ui.created()) {
+          const auto isInPresetList = vectorContains(videoHandlerYUV::formatPresetList, fmt);
+          if (!isInPresetList) {
+            videoHandlerYUV::formatPresetList.push_back(fmt);
+            const QSignalBlocker blocker(this->ui.yuvFormatComboBox);
+            this->ui.yuvFormatComboBox->insertItem(
+                this->ui.yuvFormatComboBox->count() - 1,
+                QString::fromStdString(fmt.getName()));
+          }
+          if (const auto idx = vectorIndexOf(videoHandlerYUV::formatPresetList, fmt)) {
+            const QSignalBlocker blocker(this->ui.yuvFormatComboBox);
+            this->ui.yuvFormatComboBox->setCurrentIndex(static_cast<int>(*idx));
+          }
+        }
+      }
+    });
+    dialog->open();
+    return;
+#else
     videoHandlerYUVCustomFormatDialog dialog(srcPixelFormat);
     if (dialog.exec() == QDialog::Accepted && dialog.getSelectedYUVFormat().isValid())
       newFormat = dialog.getSelectedYUVFormat();
+#endif
 
     const auto isInPresetList = vectorContains(videoHandlerYUV::formatPresetList, newFormat);
     if (!isInPresetList)
@@ -4090,6 +4119,7 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
     }
     else
     {
+#ifndef Q_OS_WASM
       // Write raw AFBC data to a temp file (auto-removed when tempIn goes out of scope)
       QTemporaryFile tempIn(QDir::temp().filePath("afbc_XXXXXX.raw"));
       tempIn.open();
@@ -4177,6 +4207,10 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
       if(this->currentFrameRawData.size() < old_size){
         this->currentFrameRawData.resize(old_size);
       }
+#else
+      Q_UNUSED(afbcDecoderPath);
+      qDebug() << "[AFBC] AFBC decoding via external process is not supported on WebAssembly.";
+#endif
     }
   }
 
@@ -4844,15 +4878,16 @@ QImage videoHandlerYUV::calculateDifference(FrameHandler    *item2,
     outputImage = QImage(QSize(w_out, h_out), QImage::Format_ARGB32_Premultiplied);
   else if (is_Q_OS_MAC)
     outputImage = QImage(QSize(w_out, h_out), QImage::Format_RGB32);
-  else if (is_Q_OS_LINUX)
+  else
   {
+    // Linux / Wasm / other
     auto format = functionsGui::platformImageFormat(tmpDiffYUVFormat.hasAlpha());
     if (format == QImage::Format_ARGB32_Premultiplied)
       outputImage = QImage(QSize(w_out, h_out), QImage::Format_ARGB32_Premultiplied);
-    if (format == QImage::Format_ARGB32)
+    else if (format == QImage::Format_ARGB32)
       outputImage = QImage(QSize(w_out, h_out), QImage::Format_ARGB32);
     else
-      outputImage = QImage(QSize(w_out, h_out), QImage::Format_RGB32);
+      outputImage = QImage(QSize(w_out, h_out), QImage::Format_ARGB32);
   }
 
   if (markDifference)
@@ -4893,9 +4928,9 @@ QImage videoHandlerYUV::calculateDifference(FrameHandler    *item2,
     }
   }
 
-  if (is_Q_OS_LINUX)
+  if (is_Q_OS_LINUX || is_Q_OS_WASM)
   {
-    // On linux, we may have to convert the image to the platform image format if it is not one of
+    // On linux/wasm, we may have to convert the image to the platform image format if it is not one of
     // the RGBA formats.
     auto format = functionsGui::platformImageFormat(tmpDiffYUVFormat.hasAlpha());
     if (format != QImage::Format_ARGB32_Premultiplied && format != QImage::Format_ARGB32 &&

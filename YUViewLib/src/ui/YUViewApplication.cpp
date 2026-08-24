@@ -74,6 +74,8 @@ YUViewApplication::YUViewApplication(int argc, char *argv[]) : QApplication(argc
   // Check if the system supports OpenGL 3.3 Core Profile.
   // Must run AFTER QApplication is created (Qt's GL platform plugin is
   // not initialized until then) but before any HDR widgets are created.
+  // On Wasm, Qt uses WebGL (OpenGL ES 2.0/3.0 subset) — skip this check.
+#ifndef Q_OS_WASM
   {
     QOpenGLContext ctx;
     ctx.setFormat(QSurfaceFormat::defaultFormat());
@@ -83,6 +85,13 @@ YUViewApplication::YUViewApplication(int argc, char *argv[]) : QApplication(argc
     if (!gl33Supported)
       qWarning() << "OpenGL 3.3 Core Profile not supported — OpenGL HDR path disabled";
   }
+#else
+  {
+    // WebAssembly always uses WebGL, OpenGL 3.3 is not available
+    QSettings settings;
+    settings.setValue("System/GL33Supported", false);
+  }
+#endif
 
   QStringList args = arguments();
   DEBUG_APP("YUViewApplication args" << args);

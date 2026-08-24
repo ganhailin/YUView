@@ -213,6 +213,7 @@ MainWindow::MainWindow(bool useAlternativeSources, QWidget *parent) : QMainWindo
 
   if (ui.playlistTreeWidget->isAutosaveAvailable())
   {
+#ifndef Q_OS_WASM
     QMessageBox::StandardButton resBtn =
         QMessageBox::question(this,
                               "Restore Playlist",
@@ -225,6 +226,9 @@ MainWindow::MainWindow(bool useAlternativeSources, QWidget *parent) : QMainWindo
       ui.playlistTreeWidget->loadAutosavedPlaylist();
     else
       ui.playlistTreeWidget->dropAutosavedPlaylist();
+#else
+    ui.playlistTreeWidget->dropAutosavedPlaylist();
+#endif
   }
   // Start the timer now (and not in the constructor of rht playlistTreeWidget) so that the autosave
   // is not accidetly overwritten.
@@ -794,12 +798,19 @@ void MainWindow::showAboutHelp(bool showAbout)
 
 void MainWindow::showSettingsWindow()
 {
+#ifdef Q_OS_WASM
+  auto *dialog = new SettingsDialog(this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &QDialog::accepted, this, [this]() { updateSettings(); });
+  dialog->open();
+#else
   SettingsDialog dialog;
   int            result = dialog.exec();
 
   if (result == QDialog::Accepted)
     // Load the new settings
     updateSettings();
+#endif
 }
 
 void MainWindow::updateSettings()
@@ -847,6 +858,7 @@ void MainWindow::updateSettings()
 void MainWindow::saveScreenshot()
 {
   // Ask the use if he wants to save the current view as it is or the complete frame of the item.
+#ifndef Q_OS_WASM
   QMessageBox msgBox;
   msgBox.setWindowTitle("Select screenshot mode");
   msgBox.setText("<b>Current View: </b>Save a screenshot of the central view as you can see it "
@@ -861,6 +873,9 @@ void MainWindow::saveScreenshot()
   if (msgBox.clickedButton() == abortButton)
     // The use pressed cancel
     return;
+#else
+  bool fullItem = false;
+#endif
 
   // What image formats are supported?
   QString     allFormats;
@@ -915,6 +930,34 @@ void MainWindow::showFileOpenDialog()
   // Get all supported extensions/filters
   QStringList filters = playlistItems::getSupportedFormatsFilters();
 
+#ifdef Q_OS_WASM
+  // On Wasm, QFileDialog is not supported (no native file dialog, exec() blocks main thread).
+  // Use QFileDialog::getOpenFileContent() which uses the browser's native file picker
+  // and delivers file content asynchronously via callback.
+  // We write the content to the Emscripten virtual filesystem and then load it.
+  QFileDialog::getOpenFileContent(
+      "All Files (*.*)",
+      [this](const QString &fileName, const QByteArray &fileContent) {
+        qDebug() << "[Wasm] getOpenFileContent callback: fileName=" << fileName << "size=" << fileContent.size();
+        if (fileName.isEmpty() || fileContent.isEmpty())
+          return;
+
+        // Write to Emscripten virtual FS under /data/
+        QDir().mkpath("/data");
+        QString vfsPath = "/data/" + QFileInfo(fileName).fileName();
+        QFile vfsFile(vfsPath);
+        if (vfsFile.open(QIODevice::WriteOnly)) {
+          vfsFile.write(fileContent);
+          vfsFile.close();
+          qDebug() << "[Wasm] Written to VFS:" << vfsPath << "exists=" << QFile::exists(vfsPath);
+        } else {
+          qDebug() << "[Wasm] Failed to write VFS file:" << vfsPath;
+        }
+
+        ui.playlistTreeWidget->loadFiles({vfsPath});
+        updateRecentFileActions();
+      });
+#else
   QFileDialog openDialog(this);
   openDialog.setDirectory(settings.value("lastFilePath").toString());
   openDialog.setFileMode(QFileDialog::ExistingFiles);
@@ -937,6 +980,7 @@ void MainWindow::showFileOpenDialog()
   ui.playlistTreeWidget->loadFiles(fileNames);
 
   updateRecentFileActions();
+#endif
 }
 
 /// End Full screen. Goto one window mode and reset all the geometry and state settings that were
@@ -1020,6 +1064,10 @@ void MainWindow::closeAndClearSettings()
 
 void MainWindow::performanceTest()
 {
+#ifdef Q_OS_WASM
+  Q_UNUSED(this);
+  return;
+#else
   performanceTestDialog dialog(this);
   if (dialog.exec() == QDialog::Accepted)
   {
@@ -1042,4 +1090,5 @@ void MainWindow::performanceTest()
       QMessageBox::information(this, "Internal Info", info);
     }
   }
+#endif
 }

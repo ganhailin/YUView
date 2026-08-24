@@ -331,6 +331,15 @@ void StatisticsStyleControl::on_pushButtonEditMap_clicked()
             emit StyleChanged();
           });
 
+#ifdef Q_OS_WASM
+  connect(&colorMapEditor, &QDialog::rejected, this, [this, originalColorMap, originalOtherColor]() {
+    this->currentItem->colorMapper.colorMap      = originalColorMap;
+    this->currentItem->colorMapper.colorMapOther = originalOtherColor;
+    this->ui.frameDataColor->setColorMapper(this->currentItem->colorMapper);
+    emit StyleChanged();
+  });
+  colorMapEditor.show();
+#else
   if (colorMapEditor.exec() == QDialog::Accepted)
   {
     auto somethingChanged = originalColorMap != colorMapEditor.getColorMap() ||
@@ -349,6 +358,7 @@ void StatisticsStyleControl::on_pushButtonEditMap_clicked()
     this->ui.frameDataColor->setColorMapper(this->currentItem->colorMapper);
     emit StyleChanged();
   }
+#endif
 }
 
 void StatisticsStyleControl::on_pushButtonSaveMap_clicked()

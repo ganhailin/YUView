@@ -763,6 +763,23 @@ void PlaylistTreeWidget::loadFiles(const QStringList &files)
     }
     else
     {
+#ifdef Q_OS_WASM
+      // On Wasm, user may need to select file type via async dialog
+      auto *self = this;
+      auto filePathCopy = filePath;
+      playlistItems::createPlaylistItemFromFileAsync(
+          this, filePathCopy,
+          [self, filePathCopy](playlistItem *newItem) {
+            if (newItem) {
+              self->appendNewItem(newItem, false);
+              self->addFileToRecentFileSetting(filePathCopy);
+              self->isSaved = false;
+              self->setCurrentItem(newItem, 0, QItemSelectionModel::ClearAndSelect);
+            }
+          });
+      // Don't set lastAddedItem here — async callback handles it
+      continue;
+#else
       // Try to open the file
       playlistItem *newItem = playlistItems::createPlaylistItemFromFile(this, filePath);
       if (newItem)
@@ -774,6 +791,7 @@ void PlaylistTreeWidget::loadFiles(const QStringList &files)
         addFileToRecentFileSetting(filePath);
         isSaved = false;
       }
+#endif
     }
   }
 
@@ -861,6 +879,7 @@ bool PlaylistTreeWidget::loadPlaylistFile(const QString &filePath)
 {
   if (topLevelItemCount() != 0)
   {
+#ifndef Q_OS_WASM
     // Clear playlist first? Ask the user
     QMessageBox msgBox(this);
     msgBox.setWindowTitle("Load playlist...");
@@ -882,6 +901,10 @@ bool PlaylistTreeWidget::loadPlaylistFile(const QString &filePath)
       // Abort loading
       return false;
     }
+#else
+    // On Wasm, just clear the playlist without asking
+    deletePlaylistItems(true);
+#endif
   }
 
   // Open the playlist file

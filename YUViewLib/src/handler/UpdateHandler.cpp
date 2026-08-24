@@ -84,7 +84,9 @@ updateHandler::updateHandler(QWidget *mainWindow, bool useAltSources) :
   useAlternativeSources = useAltSources;
 
   connect(&networkManager, &QNetworkAccessManager::finished, this, &updateHandler::replyFinished);
+#ifndef Q_OS_WASM
   connect(&networkManager, &QNetworkAccessManager::sslErrors, this, &updateHandler::sslErrors);
+#endif
 }
 
 void updateHandler::sslErrors(QNetworkReply *reply, const QList<QSslError> &errors)
@@ -143,7 +145,7 @@ void updateHandler::startCheckForNewVersion(bool userRequest, bool force)
     // We are on windows and the update feature is available.
     // Check the Github repository branch binariesAutoUpdate if there is a new version of the YUView executable available.
     // First we will try to establish a secure connection to raw.githubusercontent.com
-#if ALLOW_UNENCRYPTED_CONNECTIONS
+#if ALLOW_UNENCRYPTED_CONNECTIONS || defined(Q_OS_WASM)
     DEBUG_UPDATE("updateHandler::startCheckForNewVersion connectToHost raw.githubusercontent.com");
     updaterStatus = updaterEstablishConnection;
     userCheckRequest = userRequest;
@@ -247,12 +249,17 @@ void updateHandler::replyFinished(QNetworkReply *reply)
           else
           {
             // Ask the user if he wants to update.
+#ifndef Q_OS_WASM
             UpdateDialog update(mainWidget);
             if (update.exec() == QDialog::Accepted)
               // The user pressed 'update'
               downloadAndInstallUpdate();
             else
               updaterStatus = updaterIdle;
+#else
+            // On Wasm, skip the dialog and don't update
+            updaterStatus = updaterIdle;
+#endif
           }
 
           reply->deleteLater();
@@ -289,11 +296,13 @@ void updateHandler::replyFinished(QNetworkReply *reply)
         QString buildHash = QString::fromUtf8(YUVIEW_HASH);
         if (serverHash != buildHash)
         {
+#ifndef Q_OS_WASM
           QMessageBox msgBox;
           msgBox.setTextFormat(Qt::RichText);
           msgBox.setInformativeText("Unfortunately your version of YUView does not support automatic updating. If you compiled YUView yourself, use GIT to pull the changes and rebuild YUView. Precompiled versions of YUView are also available on Github in the releases section: <a href='https://github.com/IENT/YUView/releases'>https://github.com/IENT/YUView/releases</a>");
           msgBox.setText("A newer YUView version than the one you are currently using is available on Github.");
           msgBox.exec();
+#endif
 
           updaterStatus = updaterIdle;
           reply->deleteLater();
@@ -320,9 +329,14 @@ void updateHandler::replyFinished(QNetworkReply *reply)
       bool checkForUpdates = settings.value("checkForUpdates", true).toBool();
 
       if (checkForUpdates)
+#ifndef Q_OS_WASM
         QMessageBox::information(mainWidget, "No update found.", "Your YUView version is up to date. YUView will check for updates every time you start the application.");
+#else
+        ;
+#endif
       else
       {
+#ifndef Q_OS_WASM
         // Suggest to activate automatic update checking
         QMessageBox msgBox(mainWidget);
         msgBox.setText("Your YUView version is up to date.");
@@ -334,6 +348,7 @@ void updateHandler::replyFinished(QNetworkReply *reply)
         if (msgBox.checkBox()->isChecked())
           // Save the new setting
           settings.setValue("checkForUpdates", true);
+#endif
       }
 
       settings.endGroup();

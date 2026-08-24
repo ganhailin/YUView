@@ -548,7 +548,11 @@ void playlistItemCompressedVideo::infoListButtonPressed(int buttonID)
       uiDialog.libraryLogEdit->setPlainText(logLoadingString);
     }
 
+    #ifndef Q_OS_WASM
     newDialog.exec();
+#else
+    newDialog.show();
+#endif
   }
 }
 

@@ -146,6 +146,59 @@ playlistItem *askUserForFileTypeAndCreatePlalistItem(QWidget *  parent,
   return nullptr;
 }
 
+#ifdef Q_OS_WASM
+// Async version for Wasm: QInputDialog::getItem() uses exec() which is not supported.
+// Instead, use QInputDialog + open() with a callback.
+void askUserForFileTypeAndCreatePlalistItemAsync(
+    QWidget *parent,
+    QString fileName,
+    bool determineFileTypeAutomatically,
+    std::function<void(playlistItem *)> callback)
+{
+  const auto types = QStringList() << "Raw YUV File"
+                                   << "Raw RGB File"
+                                   << "Compressed file"
+                                   << "Image file"
+                                   << "Statistics File CSV"
+                                   << "Statistics File VTMBMS";
+  QString message = "Unable to detect file type from file extension.";
+  if (!determineFileTypeAutomatically)
+    message = "File type detection from extension is disabled (see Settings -> General).";
+
+  auto *dialog = new QInputDialog(parent);
+  dialog->setWindowTitle("Select file type");
+  dialog->setLabelText(message + " Please select how to open the file.");
+  dialog->setComboBoxItems(types);
+  dialog->setComboBoxEditable(false);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+
+  QObject::connect(dialog, &QDialog::accepted, parent, [dialog, fileName, types, parent, callback]() {
+    auto asType = dialog->textValue();
+    playlistItem *newItem = nullptr;
+    if (asType == types[0] || asType == types[1])
+    {
+      QString fmt = (asType == types[0]) ? "yuv" : "rgb";
+      newItem = new playlistItemRawFile(fileName, QSize(-1, -1), QString(), fmt);
+    }
+    else if (asType == types[2])
+      newItem = new playlistItemCompressedVideo(fileName);
+    else if (asType == types[3])
+      newItem = openImageFileOrSequence(parent, fileName);
+    else if (asType == types[4] || asType == types[5])
+    {
+      auto openMode = (asType == types[3] ? playlistItemStatisticsFile::OpenMode::CSVFile
+                                          : playlistItemStatisticsFile::OpenMode::VTMBMSFile);
+      newItem = new playlistItemStatisticsFile(fileName, openMode);
+    }
+    callback(newItem);
+  });
+  QObject::connect(dialog, &QDialog::rejected, parent, [callback]() {
+    callback(nullptr);
+  });
+  dialog->open();
+}
+#endif
+
 } // namespace
 
 namespace playlistItems
@@ -214,6 +267,26 @@ playlistItem *createPlaylistItemFromFile(QWidget *parent, const QString &fileNam
 
   return newPlaylistItem;
 }
+
+#ifdef Q_OS_WASM
+void createPlaylistItemFromFileAsync(QWidget *parent, const QString &fileName,
+                                     std::function<void(playlistItem *)> callback)
+{
+  QSettings  settings;
+  const auto determineFileTypeAutomatically = settings.value("AutodetectFileType", true).toBool();
+
+  playlistItem *newItem = nullptr;
+  if (determineFileTypeAutomatically)
+    newItem = guessFileTypeFromFileAndCreatePlaylistItem(parent, fileName);
+  if (newItem)
+  {
+    callback(newItem);
+    return;
+  }
+
+  askUserForFileTypeAndCreatePlalistItemAsync(parent, fileName, determineFileTypeAutomatically, callback);
+}
+#endif
 
 playlistItem *loadPlaylistItem(const QDomElement &elem, const QString &filePath)
 {

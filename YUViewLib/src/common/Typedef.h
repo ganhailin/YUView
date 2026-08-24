@@ -80,6 +80,12 @@ const bool is_Q_OS_LINUX = true;
 const bool is_Q_OS_LINUX = false;
 #endif
 
+#ifdef Q_OS_WASM
+const bool is_Q_OS_WASM = true;
+#else
+const bool is_Q_OS_WASM = false;
+#endif
+
 // Set this to one to enable the code that handles single instances.
 // Basically, we use a QLocalServer to try to communicate with already running instances of YUView.
 // However, it is not yet clear what to do if the user wants/needs a second instance.

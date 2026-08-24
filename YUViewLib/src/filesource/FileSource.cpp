@@ -50,10 +50,12 @@
 
 FileSource::FileSource()
 {
+#ifndef Q_OS_WASM
   connect(&fileWatcher,
           &QFileSystemWatcher::fileChanged,
           this,
           &FileSource::fileSystemWatcherFileChanged);
+#endif
 }
 
 bool FileSource::openFile(const std::string &filePath)
@@ -154,6 +156,7 @@ bool FileSource::getAndResetFileChangedFlag()
 
 void FileSource::updateFileWatchSetting()
 {
+#ifndef Q_OS_WASM
   // Install a file watcher if file watching is active in the settings.
   // The addPath/removePath functions will do nothing if called twice for the same file.
   QSettings settings;
@@ -161,6 +164,9 @@ void FileSource::updateFileWatchSetting()
     fileWatcher.addPath(pathToQString(this->fullFilePath));
   else
     fileWatcher.removePath(pathToQString(this->fullFilePath));
+#else
+  Q_UNUSED(this);
+#endif
 }
 
 void FileSource::clearFileCache()
