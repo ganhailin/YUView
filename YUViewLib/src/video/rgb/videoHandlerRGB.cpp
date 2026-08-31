@@ -50,6 +50,10 @@
 #include <QTemporaryFile>
 #include <QMessageBox>
 #include <QApplication>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
 #include <QtGlobal>
 
 namespace video::rgb
@@ -500,6 +504,32 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
   // Decode AFBC compressed data using the external decoder tool
   if (this->fbcFormat != FBCFormat::Raster)
   {
+    if (this->afbcDecodeFailedFrames.contains(frameIndex))
+    {
+      // A previous decode attempt for this frame failed. Do not launch the
+      // decoder again on every redraw/reload.
+      DEBUG_RGB("videoHandlerRGB::loadFrame AFBC decode previously failed for frame %d", frameIndex);
+      return;
+    }
+    if (this->afbcDecodedFrames.contains(frameIndex))
+    {
+      // This frame was already decoded from AFBC to raster. currentFrameRawData
+      // already contains the raster data. Do not run the decoder again.
+      DEBUG_RGB("videoHandlerRGB::loadFrame AFBC already decoded for frame %d", frameIndex);
+      goto frameReady;
+    }
+
+#ifdef Q_OS_WASM
+    // Browsers cannot execute the native AFBC tool. Queue the request on this
+    // QObject's thread because QNetworkAccessManager has thread affinity.
+    // The completion handler invalidates the image and triggers a reload.
+    const auto compressedFrame = this->currentFrameRawData;
+    QMetaObject::invokeMethod(
+        this,
+        [this, frameIndex, compressedFrame]() { requestAfbcDecode(frameIndex, compressedFrame); },
+        Qt::QueuedConnection);
+    return;
+#else
     QSettings settings;
     settings.beginGroup("RKTools");
     QString afbcDecoderPath = settings.value("AFBCDecoderPath", "").toString();
@@ -512,10 +542,11 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
       QMetaObject::invokeMethod(qApp, [errorMsg]() {
         QMessageBox::warning(nullptr, "AFBC Decoder Path Not Set", errorMsg);
       }, Qt::QueuedConnection);
+      this->afbcDecodeFailedFrames.insert(frameIndex);
+      return;
     }
     else
     {
-#ifndef Q_OS_WASM
       // Write raw AFBC data to a temp file (auto-removed when tempIn goes out of scope)
       QTemporaryFile tempIn(QDir::temp().filePath("afbc_XXXXXX.raw"));
       tempIn.open();
@@ -561,6 +592,13 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
           {
             this->currentFrameRawData = rasterFile.readAll();
             qDebug() << "[AFBC] Output raster size:" << this->currentFrameRawData.size() << "bytes";
+            this->afbcDecodedFrames.insert(frameIndex);
+          }
+          else
+          {
+            qWarning() << "[AFBC] Decoder succeeded but did not produce a readable raster file.";
+            this->afbcDecodeFailedFrames.insert(frameIndex);
+            return;
           }
         }
         else
@@ -575,6 +613,8 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
           QMetaObject::invokeMethod(qApp, [errorMsg]() {
             QMessageBox::critical(nullptr, "AFBC Decoder Error", errorMsg);
           }, Qt::QueuedConnection);
+          this->afbcDecodeFailedFrames.insert(frameIndex);
+          return;
         }
       }
       else
@@ -587,17 +627,17 @@ void videoHandlerRGB::loadFrame(int frameIndex, bool loadToDoubleBuffer)
         QMetaObject::invokeMethod(qApp, [errorMsg]() {
           QMessageBox::critical(nullptr, "AFBC Decoder Error", errorMsg);
         }, Qt::QueuedConnection);
+        this->afbcDecodeFailedFrames.insert(frameIndex);
+        return;
       }
       if(this->currentFrameRawData.size() < old_size){
         this->currentFrameRawData.resize(old_size);
       }
-#else
-      Q_UNUSED(afbcDecoderPath);
-      qDebug() << "[AFBC] AFBC decoding via external process is not supported on WebAssembly.";
-#endif
     }
+#endif
   }
 
+frameReady:
   // The data in currentFrameRawData is now up to date. If necessary
   // convert the data to RGB.
   if (loadToDoubleBuffer)
@@ -699,6 +739,33 @@ void videoHandlerRGB::loadFrameForCaching(int frameIndex, QImage &frameToCache)
 {
   DEBUG_RGB("videoHandlerRGB::loadFrameForCaching %d", frameIndex);
 
+#ifdef Q_OS_WASM
+  if (this->fbcFormat != FBCFormat::Raster)
+  {
+    // Do not re-launch a decode for frames that already failed or already
+    // decoded successfully. This mirrors the checks in loadFrame().
+    if (this->afbcDecodeFailedFrames.contains(frameIndex) ||
+        this->afbcDecodedFrames.contains(frameIndex))
+      return;
+
+    // Caching workers cannot wait for a browser HTTP request. Request the
+    // compressed frame synchronously, then start decoding on this object's
+    // thread. The normal reload path will cache the decoded image later.
+    requestDataMutex.lock();
+    emit signalRequestRawData(frameIndex, true);
+    const auto compressedFrame = rawData;
+    const auto frameWasLoaded  = rawData_frameIndex == frameIndex;
+    requestDataMutex.unlock();
+
+    if (frameWasLoaded)
+      QMetaObject::invokeMethod(
+          this,
+          [this, frameIndex, compressedFrame]() { requestAfbcDecode(frameIndex, compressedFrame); },
+          Qt::QueuedConnection);
+    return;
+  }
+#endif
+
   // Lock the mutex for the rgbFormat. The main thread has to wait until caching is done
   // before the RGB format can change.
   rgbFormatMutex.lock();
@@ -722,6 +789,83 @@ void videoHandlerRGB::loadFrameForCaching(int frameIndex, QImage &frameToCache)
   rgbFormatMutex.unlock();
 }
 
+#ifdef Q_OS_WASM
+void videoHandlerRGB::requestAfbcDecode(int frameIndex, QByteArray compressedFrame)
+{
+  if (compressedFrame.isEmpty() || afbcFramesBeingDecoded.contains(frameIndex))
+    return;
+
+  QSettings settings;
+  settings.beginGroup("RKTools");
+  const auto decoderServiceUrl =
+      settings.value("AFBCDecoderServiceUrl", "http://127.0.0.1:8080").toString();
+  settings.endGroup();
+
+  QUrl url(decoderServiceUrl);
+  if (!url.isValid() || (url.scheme() != "http" && url.scheme() != "https"))
+  {
+    qWarning() << "[AFBC] Decoder service URL is not configured or invalid.";
+    return;
+  }
+  url.setPath("/v1/afbc/decode");
+  url.setQuery(QString());
+
+  if (afbcDecoderNetworkManager == nullptr)
+    afbcDecoderNetworkManager = new QNetworkAccessManager(this);
+
+  const auto bitsPerSample = this->srcPixelFormat.getBitsPerSample();
+  QString mode = QString("r%1g%2b%3").arg(bitsPerSample).arg(bitsPerSample).arg(bitsPerSample);
+  if (this->srcPixelFormat.hasAlpha())
+    mode += QString("a%1").arg(this->srcPixelFormat.getBitsPerSampleForAlpha());
+  mode += this->getAfbcModeSuffix();
+
+  QNetworkRequest request(url);
+  request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+  request.setRawHeader("X-Afbc-Width", QByteArray::number(this->frameSize.width));
+  request.setRawHeader("X-Afbc-Height", QByteArray::number(this->frameSize.height));
+  request.setRawHeader("X-Afbc-Mode", mode.toLatin1());
+  request.setTransferTimeout(15'000);
+
+  afbcFramesBeingDecoded.insert(frameIndex);
+  auto *reply = afbcDecoderNetworkManager->post(request, compressedFrame);
+  connect(reply, &QNetworkReply::finished, this, [this, frameIndex, reply]() {
+    handleAfbcDecodeFinished(frameIndex, reply);
+  });
+}
+
+void videoHandlerRGB::handleAfbcDecodeFinished(int frameIndex, QNetworkReply *reply)
+{
+  afbcFramesBeingDecoded.remove(frameIndex);
+
+  const auto networkError = reply->error();
+  const auto responseCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+  const auto responseData = reply->readAll();
+  if (networkError != QNetworkReply::NoError || responseCode != 200 ||
+      responseData.size() != this->getBytesPerFrame())
+  {
+    qWarning() << "[AFBC] Decoder service request failed for frame" << frameIndex
+               << "HTTP status" << responseCode << "error" << reply->errorString()
+               << "response:" << QString::fromUtf8(responseData)
+               << "output size" << responseData.size() << "expected" << this->getBytesPerFrame();
+    // Record the failure so loadFrame() stops re-launching the request on every
+    // redraw. The entry is cleared when the source data is reloaded.
+    this->afbcDecodeFailedFrames.insert(frameIndex);
+    reply->deleteLater();
+    return;
+  }
+
+  this->currentFrameRawData            = responseData;
+  this->currentFrameRawData_frameIndex = frameIndex;
+  this->currentImageIndex              = -1;
+  // Mark this frame as decoded so the RECACHE_CLEAR triggered below does not
+  // re-launch a decode for the same frame.
+  this->afbcDecodedFrames.insert(frameIndex);
+  this->removeAllFrameFromCache();
+  emit signalHandlerChanged(true, RECACHE_CLEAR);
+  reply->deleteLater();
+}
+#endif
+
 // Load the raw RGB data for the given frame index into currentFrameRawData.
 bool videoHandlerRGB::loadRawRGBData(int frameIndex)
 {
@@ -729,6 +873,9 @@ bool videoHandlerRGB::loadRawRGBData(int frameIndex)
 
   if (currentFrameRawData_frameIndex == frameIndex && cacheValid)
   {
+    // Note: for AFBC frames this buffer may already hold the decoded raster data.
+    // Do not clear the afbc* sets here, otherwise loadFrame() would re-launch the
+    // decoder on every redraw (the loop this fix prevents).
     DEBUG_RGB("videoHandlerRGB::loadRawRGBData frame %d already in the current buffer - Done",
               frameIndex);
     return true;
@@ -742,6 +889,10 @@ bool videoHandlerRGB::loadRawRGBData(int frameIndex)
     currentFrameRawData            = rawData;
     currentFrameRawData_frameIndex = frameIndex;
     requestDataMutex.unlock();
+    // The buffer now holds fresh compressed data, so any previous AFBC decode
+    // state for this frame is stale and must be cleared.
+    this->afbcDecodeFailedFrames.remove(frameIndex);
+    this->afbcDecodedFrames.remove(frameIndex);
     return true;
   }
 
@@ -755,6 +906,9 @@ bool videoHandlerRGB::loadRawRGBData(int frameIndex)
   {
     currentFrameRawData            = rawData;
     currentFrameRawData_frameIndex = frameIndex;
+    // Fresh compressed data was read, invalidate the previous AFBC decode state.
+    this->afbcDecodeFailedFrames.remove(frameIndex);
+    this->afbcDecodedFrames.remove(frameIndex);
   }
   requestDataMutex.unlock();
 
@@ -811,6 +965,10 @@ void videoHandlerRGB::setSrcPixelFormat(const PixelFormatRGB &newFormat)
 {
   this->rgbFormatMutex.lock();
   this->srcPixelFormat = newFormat;
+  // A different pixel format means a different way to interpret the compressed
+  // data, so any previous AFBC decode state is stale and must be cleared.
+  this->afbcDecodeFailedFrames.clear();
+  this->afbcDecodedFrames.clear();
   this->updateControlsForNewPixelFormat();
   this->rgbFormatMutex.unlock();
 }

@@ -198,8 +198,16 @@ void VideoCache::updateSettings()
   int targetNrThreads = functions::getOptimalThreadCount();
   if (settings.value("SetNrThreads", false).toBool())
     targetNrThreads = settings.value("NrThreads", targetNrThreads).toInt();
+#ifdef Q_OS_WASM
+  // On WebAssembly, background caching threads busy-wait in their event loops
+  // and consume full CPU cores. Do not create any caching threads; the two
+  // interactive loading threads still handle frame loading.
+  if (targetNrThreads <= 0)
+    targetNrThreads = 0;
+#else
   if (targetNrThreads <= 0)
     targetNrThreads = 1;
+#endif
   if (!cachingEnabled)
     targetNrThreads = 0;
 
@@ -274,9 +282,16 @@ void VideoCache::loadFrame(playlistItem *item, int frameIndex, int loadingSlot)
   {
     // Let the interactive worker work...
     bool loadRawData = splitView->showRawData() && !playback->playing();
+#ifdef Q_OS_WASM
+    // On WebAssembly the thread blocks on a QWaitCondition; submit the job
+    // directly instead of relying on a queued invokeMethod.
+    interactiveThread[loadingSlot]->submitLoadingJob(
+        item, frameIndex, playback->playing(), loadRawData);
+#else
     interactiveThread[loadingSlot]->worker()->setJob(item, frameIndex);
     interactiveThread[loadingSlot]->worker()->setWorking(true);
     interactiveThread[loadingSlot]->worker()->processLoadingJob(playback->playing(), loadRawData);
+#endif
     DEBUG_CACHING_DETAIL("VideoCache::loadFrame %d started - slot %d", frameIndex, loadingSlot);
 
     emit updateCacheStatus();
@@ -330,10 +345,17 @@ void VideoCache::interactiveLoaderFinished()
   {
     // Let the interactive worker work on the queued request.
     bool loadRawData = splitView->showRawData() && !playback->playing();
+#ifdef Q_OS_WASM
+    interactiveThread[threadID]->submitLoadingJob(interactiveItemQueued[threadID],
+                                                  interactiveItemQueued_Idx[threadID],
+                                                  playback->playing(),
+                                                  loadRawData);
+#else
     interactiveThread[threadID]->worker()->setJob(interactiveItemQueued[threadID],
                                                   interactiveItemQueued_Idx[threadID]);
     interactiveThread[threadID]->worker()->setWorking(true);
     interactiveThread[threadID]->worker()->processLoadingJob(playback->playing(), loadRawData);
+#endif
     DEBUG_CACHING_DETAIL("VideoCache::interactiveLoaderFinished %d started - slot %d",
                          interactiveItemQueued_Idx[threadID],
                          threadID);
@@ -1091,9 +1113,13 @@ bool VideoCache::pushNextJobToCachingThread(LoadingThread *thread)
                       range.second);
     if (frameNr < 0)
       frameNr = 0;
+#ifdef Q_OS_WASM
+    thread->submitCacheJob(testItem, frameNr, true);
+#else
     thread->worker()->setJob(testItem, frameNr, true);
     thread->worker()->setWorking(true);
     thread->worker()->processCacheJob();
+#endif
     DEBUG_CACHING_DETAIL("VideoCache::pushNextJobToCachingThread - %d of %s",
                          frameNr,
                          testItem->getName().toStdString().c_str());
@@ -1212,9 +1238,13 @@ bool VideoCache::pushNextJobToCachingThread(LoadingThread *thread)
 
   // Push the job to the thread
   Q_ASSERT_X(plItem != nullptr && frameToCache >= 0, Q_FUNC_INFO, "Invalid job.");
+#ifdef Q_OS_WASM
+  thread->submitCacheJob(plItem, frameToCache, false);
+#else
   thread->worker()->setJob(plItem, frameToCache);
   thread->worker()->setWorking(true);
   thread->worker()->processCacheJob();
+#endif
   DEBUG_CACHING_DETAIL("VideoCache::pushNextJobToCachingThread - %d of %s",
                        frameToCache,
                        plItem->getName().toStdString().c_str());

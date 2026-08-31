@@ -11,7 +11,11 @@ DOCKERFILE="$SCRIPT_DIR/Dockerfile.wasm"
 
 # QMake arguments:
 #   QMAKE_LFLAGS_RELEASE = -O0  →  skip wasm-opt (crashes on large .wasm)
-#   PTHREAD_POOL_SIZE=64         →  enough threads for VideoCache + workers
+#   QMAKE_CXXFLAGS += -g        →  compile with DWARF debug info (for source maps)
+#   PTHREAD_POOL_SIZE=12        →  Emscripten pre-creates this many workers.
+#                                  YUView uses ~9 threads (7 cache + 2 interactive).
+#                                  A large pool (e.g. 64) makes every idle worker
+#                                  busy-wait in its event loop, pegging all cores.
 #   PTHREAD_POOL_SIZE_STRICT=0   →  don't crash on pool exhaustion
 
 # Colors
@@ -59,19 +63,35 @@ docker run --rm -v "$SCRIPT_DIR:/app" "$DOCKER_IMAGE" \
     sh -c "cd /app/build-wasm && \
            /opt/Qt/6.11.1/wasm_multithread/bin/qmake /app/YUView.pro \
            'QMAKE_LFLAGS_RELEASE = -O0' \
-           'QMAKE_LFLAGS += -s PTHREAD_POOL_SIZE=64' \
+           'QMAKE_CXXFLAGS += -g' \
+           'QMAKE_LFLAGS += -s PTHREAD_POOL_SIZE=12' \
            'QMAKE_LFLAGS += -s PTHREAD_POOL_SIZE_STRICT=0' \
            'QMAKE_LFLAGS += -s NO_DISABLE_EXCEPTION_CATCHING=1'"
 
 # Fix PTHREAD_POOL_SIZE (qmake doesn't persist it in sub-makefiles)
 info "Fixing PTHREAD_POOL_SIZE in Makefiles..."
-sed -i 's/PTHREAD_POOL_SIZE=4/PTHREAD_POOL_SIZE=64/g' "$BUILD_DIR"/YUViewApp/Makefile 2>/dev/null || true
+sed -i 's/PTHREAD_POOL_SIZE=4/PTHREAD_POOL_SIZE=12/g' "$BUILD_DIR"/YUViewApp/Makefile 2>/dev/null || true
+sed -i 's/PTHREAD_POOL_SIZE=64/PTHREAD_POOL_SIZE=12/g' "$BUILD_DIR"/YUViewApp/Makefile 2>/dev/null || true
 
 # Build
 info "Building..."
 JOBS=$(nproc 2>/dev/null || echo 4)
+# Enable source maps inside the container right before make, because qmake
+# regenerates the sub-makefiles when the top-level Makefile runs. The flags:
+#   -g                    → compile with DWARF debug info (added via QMAKE_CXXFLAGS)
+#   -gsource-map=inline   → link with source map + embedded sources (YUView.wasm.map)
+# The LFLAGS sed is idempotent: it strips any previously added source-map flags
+# first, so repeated builds do not accumulate duplicates.
+#
+# ALLOW_MEMORY_GROWTH is removed: with -pthread it makes idle worker threads
+# busy-wait in handleMessage/_clock_time_get, pegging all CPU cores. A fixed
+# large heap (INITIAL_MEMORY=1GB) lets pthreads block normally instead.
 docker run --rm -v "$SCRIPT_DIR:/app" "$DOCKER_IMAGE" \
-    sh -c "cd /app/build-wasm && make -j$JOBS"
+    sh -c "cd /app/build-wasm && \
+           sed -i 's/ -gsource-map=inline//g; s/ -g4//g; s/ -gsource-map / /g; s/^LFLAGS        = /LFLAGS        = -gsource-map=inline /' YUViewApp/Makefile && \
+           sed -i 's/ -sALLOW_MEMORY_GROWTH//g; s/ -s MAXIMUM_MEMORY=[0-9A-Za-z]*//g; s/ -s INITIAL_MEMORY=[0-9A-Za-z]*/ -s INITIAL_MEMORY=1GB/' YUViewApp/Makefile && \
+           sed -i 's/PTHREAD_POOL_SIZE=4/PTHREAD_POOL_SIZE=12/g; s/PTHREAD_POOL_SIZE=64/PTHREAD_POOL_SIZE=12/g' YUViewApp/Makefile && \
+           make -j$JOBS"
 
 # Check result
 WASM_FILE="$BUILD_DIR/YUViewApp/YUView.wasm"

@@ -35,7 +35,12 @@
 #include <video/rgb/PixelFormatRGB.h>
 #include <video/videoHandler.h>
 
+#include <QSet>
+
 #include "ui_videoHandlerRGB.h"
+
+class QNetworkAccessManager;
+class QNetworkReply;
 
 namespace video::rgb
 {
@@ -76,6 +81,8 @@ public:
   {
     this->currentFrameRawData_frameIndex = -1;
     this->rawData_frameIndex = -1;
+    this->afbcDecodeFailedFrames.clear();
+    this->afbcDecodedFrames.clear();
   }
 
   // Return the RGB values for the given pixel
@@ -181,6 +188,11 @@ protected:
   virtual void loadFrameForCaching(int frameIndex, QImage &frameToCache) override;
 
 private:
+#ifdef Q_OS_WASM
+  void requestAfbcDecode(int frameIndex, QByteArray compressedFrame);
+  void handleAfbcDecodeFinished(int frameIndex, QNetworkReply *reply);
+#endif
+
   // Load the raw RGB data for the given frame index into currentFrameRawRGBData.
   // Return false is loading failed.
   bool loadRawRGBData(int frameIndex);
@@ -203,6 +215,19 @@ private:
   QMutex rgbFormatMutex;
 
   SafeUi<Ui::videoHandlerRGB> ui;
+
+  // A failed AFBC decode must not be launched repeatedly by redraw or caching requests.
+  // Entries are cleared when the compressed source data or AFBC format changes.
+  QSet<int> afbcDecodeFailedFrames;
+  // Frames that have already been decoded from AFBC to raster. The raster data
+  // now lives in currentFrameRawData, so we must not run the decoder again for
+  // the same frame.
+  QSet<int> afbcDecodedFrames;
+
+#ifdef Q_OS_WASM
+  QNetworkAccessManager *afbcDecoderNetworkManager{nullptr};
+  QSet<int>              afbcFramesBeingDecoded;
+#endif
 
 private slots:
 

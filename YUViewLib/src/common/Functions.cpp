@@ -54,11 +54,19 @@ namespace functions
 
 unsigned int getOptimalThreadCount()
 {
+#ifdef Q_OS_WASM
+  // On WebAssembly every worker thread runs a busy event loop that consumes a
+  // full CPU core (Qt's QEventDispatcherWasm busy-waits when idle). Return 0 so
+  // the VideoCache does not spawn background caching threads; the two
+  // interactive loading threads are still created by VideoCache itself.
+  return 0;
+#else
   int nrThreads = QThread::idealThreadCount() - 1;
   if (nrThreads > 0)
     return (unsigned int)nrThreads;
   else
     return 1;
+#endif
 }
 
 unsigned int systemMemorySizeInMB()

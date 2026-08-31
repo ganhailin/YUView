@@ -32,6 +32,8 @@
 
 #pragma once
 
+#include <QSet>
+
 #include <common/EnumMapper.h>
 #include <video/videoHandler.h>
 #include <video/yuv/PixelFormatYUV.h>
@@ -93,6 +95,8 @@ public:
   {
     this->currentFrameRawData_frameIndex = -1;
     this->rawData_frameIndex = -1;
+    this->afbcDecodeFailedFrames.clear();
+    this->afbcDecodedFrames.clear();
   }
 
   // The format is valid if the frame width/height/pixel format are set
@@ -244,6 +248,13 @@ private:
   QByteArray     diffYUV;
   PixelFormatYUV diffYUVFormat{};
   QByteArray     copyData;
+  // A failed AFBC decode must not be launched repeatedly by redraw or caching requests.
+  // Entries are cleared when the compressed source data or AFBC format changes.
+  QSet<int>      afbcDecodeFailedFrames;
+  // Frames that have already been decoded from AFBC to raster. The raster data
+  // now lives in currentFrameRawData, so we must not run the decoder again for
+  // the same frame.
+  QSet<int>      afbcDecodedFrames;
 
   static std::vector<PixelFormatYUV> formatPresetList;
 

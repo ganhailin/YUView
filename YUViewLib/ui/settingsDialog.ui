@@ -1441,6 +1441,20 @@
            </property>
           </widget>
          </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="labelAFBCDecoderServiceUrl">
+           <property name="text">
+            <string>AFBC Decoder Service URL</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1" colspan="3">
+          <widget class="QLineEdit" name="lineEditAFBCDecoderServiceUrl">
+           <property name="placeholderText">
+            <string>https://afbc-decoder.example.internal:8080</string>
+           </property>
+          </widget>
+         </item>
         </layout>
        </item>
        <item>

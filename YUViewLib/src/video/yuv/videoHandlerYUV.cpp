@@ -3483,6 +3483,8 @@ void videoHandlerYUV::setSrcPixelFormat(PixelFormatYUV format, bool emitSignal)
   // Set the new pixel format. Lock the mutex, so that no background process is running wile the
   // format changes.
   srcPixelFormat = format;
+  this->afbcDecodeFailedFrames.clear();
+  this->afbcDecodedFrames.clear();
 
   // Update the math parameter offset (the default offset depends on the bit depth and the range)
   int        shift     = format.getBitsPerSample() - 8;
@@ -4098,6 +4100,19 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
   // Decode AFBC compressed data using the external decoder tool
   if (this->fbcFormat != FBCFormat::Raster)
   {
+    if (this->afbcDecodeFailedFrames.contains(frameIndex))
+    {
+      DEBUG_YUV("videoHandlerYUV::loadFrame AFBC decode previously failed for frame " << frameIndex);
+      return;
+    }
+    if (this->afbcDecodedFrames.contains(frameIndex))
+    {
+      // This frame was already decoded from AFBC to raster. currentFrameRawData
+      // already contains the raster data. Do not run the decoder again.
+      DEBUG_YUV("videoHandlerYUV::loadFrame AFBC already decoded for frame " << frameIndex);
+      goto frameReady;
+    }
+
     if (!this->srcPixelFormatOriginalSaved)
     {
       this->srcPixelFormatOriginal      = this->srcPixelFormat;
@@ -4116,6 +4131,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
       QMetaObject::invokeMethod(qApp, [errorMsg]() {
         QMessageBox::warning(nullptr, "AFBC Decoder Path Not Set", errorMsg);
       }, Qt::QueuedConnection);
+      this->afbcDecodeFailedFrames.insert(frameIndex);
+      return;
     }
     else
     {
@@ -4177,6 +4194,13 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
           {
             this->currentFrameRawData = rasterFile.readAll();
             qDebug() << "[AFBC] Output raster size:" << this->currentFrameRawData.size() << "bytes";
+            this->afbcDecodedFrames.insert(frameIndex);
+          }
+          else
+          {
+            qWarning() << "[AFBC] Decoder succeeded but did not produce a readable raster file.";
+            this->afbcDecodeFailedFrames.insert(frameIndex);
+            return;
           }
         }
         else
@@ -4191,6 +4215,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
           QMetaObject::invokeMethod(qApp, [errorMsg]() {
             QMessageBox::critical(nullptr, "AFBC Decoder Error", errorMsg);
           }, Qt::QueuedConnection);
+          this->afbcDecodeFailedFrames.insert(frameIndex);
+          return;
         }
       }
       else
@@ -4203,6 +4229,8 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
         QMetaObject::invokeMethod(qApp, [errorMsg]() {
           QMessageBox::critical(nullptr, "AFBC Decoder Error", errorMsg);
         }, Qt::QueuedConnection);
+        this->afbcDecodeFailedFrames.insert(frameIndex);
+        return;
       }
       if(this->currentFrameRawData.size() < old_size){
         this->currentFrameRawData.resize(old_size);
@@ -4210,10 +4238,13 @@ void videoHandlerYUV::loadFrame(int frameIndex, bool loadToDoubleBuffer)
 #else
       Q_UNUSED(afbcDecoderPath);
       qDebug() << "[AFBC] AFBC decoding via external process is not supported on WebAssembly.";
+  this->afbcDecodeFailedFrames.insert(frameIndex);
+  return;
 #endif
     }
   }
 
+frameReady:
   // The data in currentFrameRawData is now up to date. If necessary
   // convert the data to RGB.
   if (loadToDoubleBuffer)
@@ -4340,6 +4371,8 @@ bool videoHandlerYUV::loadRawYUVData(int frameIndex)
 
   currentFrameRawData            = rawData;
   currentFrameRawData_frameIndex = frameIndex;
+  afbcDecodeFailedFrames.remove(frameIndex);
+  afbcDecodedFrames.remove(frameIndex);
   requestDataMutex.unlock();
 
   DEBUG_YUV("videoHandlerYUV::loadRawYUVData " << frameIndex << " Done");

@@ -58,12 +58,13 @@ public:
   // called from the main thread. It will still process the call in the separate thread.
   void processCacheJob();
   void processLoadingJob(bool playing, bool loadRawData);
-signals:
-  void loadingFinished();
-private slots:
+
+  // The actual job processing functions. LoadingThread::run() calls these directly on
+  // WebAssembly, where the thread blocks on a QWaitCondition instead of a busy event loop.
   void processCacheJobInternal();
   void processLoadingJobInternal(bool playing, bool loadRawData);
-
+signals:
+  void loadingFinished();
 private:
   playlistItem *currentCacheItem{};
   int           currentFrame{};

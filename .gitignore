@@ -18,3 +18,23 @@ YUView.pro.user
 /decoders
 .vscode
 issues
+
+# WebAssembly build output
+/build-wasm/
+
+# AFBC decoder binary (downloaded prebuilt tool, not source code)
+/afbcdec_linux_static
+
+# AFBC test sample data
+/1280x720_AB24_AFBC.bin
+
+# googletest-qmake build artifacts
+/submodules/googletest-qmake/build/
+
+# AFBC decoder server: generated release package (built by package_release.sh)
+# (includes the self-signed HTTPS certificate under Release/certs)
+/tools/afbcDecoderServer/Release/
+
+# Python caches
+__pycache__/
+*.pyc
