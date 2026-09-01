@@ -44,6 +44,12 @@ namespace functions
 // so that one thread is "reserved" for the main GUI. I don't know if this is optimal.
 unsigned int getOptimalThreadCount();
 
+// Get the default AFBC decoder service URL. On WebAssembly this returns the
+// current page origin (the decoder service is normally served from the same
+// host as the page), instead of a hard-coded 127.0.0.1 that would point at the
+// browser's own machine. On desktop it returns http://127.0.0.1:8080.
+QString getDefaultAfbcDecoderServiceUrl();
+
 // Returns the size of system memory in megabytes.
 // This function is thread safe and inexpensive to call.
 unsigned int systemMemorySizeInMB();

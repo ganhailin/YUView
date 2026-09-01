@@ -157,6 +157,19 @@ def parse_positive_header(headers, name: str, maximum: int) -> int:
 	return value
 
 
+def is_relative_to(path: Path, other: Path) -> bool:
+	"""Return whether *path* is equal to or under *other*.
+
+	`Path.is_relative_to()` is only available on Python 3.9+, so this small
+	helper keeps the service compatible with Python 3.8.
+	"""
+	try:
+		path.relative_to(other)
+	except ValueError:
+		return False
+	return True
+
+
 def parse_decode_request(headers, config: Config) -> DecodeRequest:
 	width = parse_positive_header(headers, "X-Afbc-Width", config.max_width)
 	height = parse_positive_header(headers, "X-Afbc-Height", config.max_height)
@@ -232,18 +245,20 @@ class AfbcDecoder:
 				# Temporary files avoid unbounded output pipes if a broken
 				# decoder prints excessive diagnostics. Bounded tails are
 				# logged and returned to the client only on failure.
-				with (decoder_stdout_path.open("wb") as decoder_stdout,
-				      decoder_stderr_path.open("wb") as decoder_stderr):
-					process = subprocess.Popen(
-						command,
-						cwd=directory,
-						stdin=subprocess.DEVNULL,
-						stdout=decoder_stdout,
-						stderr=decoder_stderr,
-						shell=False,
-						start_new_session=True,
-					)
-					process.wait(timeout=self.config.timeout_seconds)
+				# NOTE: a single parenthesized `with (...)` is Python 3.10+
+				# only, so split it to stay compatible with Python 3.8.
+				with decoder_stdout_path.open("wb") as decoder_stdout:
+					with decoder_stderr_path.open("wb") as decoder_stderr:
+						process = subprocess.Popen(
+							command,
+							cwd=directory,
+							stdin=subprocess.DEVNULL,
+							stdout=decoder_stdout,
+							stderr=decoder_stderr,
+							shell=False,
+							start_new_session=True,
+						)
+						process.wait(timeout=self.config.timeout_seconds)
 			except subprocess.TimeoutExpired:
 				if process is not None:
 					os.killpg(process.pid, signal.SIGKILL)
@@ -443,7 +458,7 @@ class DecoderRequestHandler(BaseHTTPRequestHandler):
 
 		static_root = self.server.config.static_root
 		candidate = (static_root / relative_path).resolve()
-		if not candidate.is_relative_to(static_root) or not candidate.is_file():
+		if not is_relative_to(candidate, static_root) or not candidate.is_file():
 			raise RequestError(HTTPStatus.NOT_FOUND, "not_found")
 		return candidate
 

@@ -798,7 +798,7 @@ void videoHandlerRGB::requestAfbcDecode(int frameIndex, QByteArray compressedFra
   QSettings settings;
   settings.beginGroup("RKTools");
   const auto decoderServiceUrl =
-      settings.value("AFBCDecoderServiceUrl", "http://127.0.0.1:8080").toString();
+      settings.value("AFBCDecoderServiceUrl", functions::getDefaultAfbcDecoderServiceUrl()).toString();
   settings.endGroup();
 
   QUrl url(decoderServiceUrl);

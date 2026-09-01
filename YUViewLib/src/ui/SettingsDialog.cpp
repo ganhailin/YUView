@@ -170,7 +170,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
   settings.beginGroup("RKTools");
   ui.lineEditAFBCDecoderPath->setText(settings.value("AFBCDecoderPath", "").toString());
   ui.lineEditAFBCDecoderServiceUrl->setText(
-      settings.value("AFBCDecoderServiceUrl", "http://127.0.0.1:8080").toString());
+      settings.value("AFBCDecoderServiceUrl", functions::getDefaultAfbcDecoderServiceUrl()).toString());
   settings.endGroup();
 }
 

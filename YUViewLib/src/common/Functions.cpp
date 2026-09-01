@@ -41,6 +41,10 @@
 #include <windows.h>
 #endif
 
+#ifdef Q_OS_WASM
+#include <emscripten/val.h>
+#endif
+
 #include <algorithm>
 #include <charconv>
 #include <string_view>
@@ -67,6 +71,29 @@ unsigned int getOptimalThreadCount()
   else
     return 1;
 #endif
+}
+
+QString getDefaultAfbcDecoderServiceUrl()
+{
+#ifdef Q_OS_WASM
+  // The AFBC decoder service is normally served from the same origin as the
+  // page (see tools/afbcDecoderServer/package_release.sh). Hard-coding
+  // 127.0.0.1 would point at the browser's own machine, which breaks when the
+  // server is accessed from another host on the LAN. Use the page origin so
+  // the default "just works" for the combined release package.
+  try
+  {
+    emscripten::val location = emscripten::val::global("location");
+    const auto origin = location["origin"].as<std::string>();
+    if (!origin.empty())
+      return QString::fromStdString(origin);
+  }
+  catch (...)
+  {
+    // Fall through to the desktop default below.
+  }
+#endif
+  return "http://127.0.0.1:8080";
 }
 
 unsigned int systemMemorySizeInMB()

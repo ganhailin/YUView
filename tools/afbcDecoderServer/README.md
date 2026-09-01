@@ -4,7 +4,7 @@ A small, dependency-free HTTP service for the WebAssembly build of YUView. It ac
 
 ## Prerequisites
 
-- Python 3.10 or newer on Linux.
+- Python 3.8 or newer on Linux.
 - A locally installed, executable AFBC decoder compatible with YUView's existing command line:
 
   ```text
