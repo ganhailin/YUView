@@ -35,8 +35,11 @@
 #include <QDebug>
 
 #include <QBuffer>
+#include <QDir>
 #include <QDragMoveEvent>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QMenu>
@@ -229,6 +232,30 @@ void PlaylistTreeWidget::dropEvent(QDropEvent *event)
     for (auto &url : urls)
     {
       QString fileName = url.toLocalFile();
+#ifdef Q_OS_WASM
+      // On WebAssembly, browser drag-and-drop files are written by Qt to the
+      // temporary Emscripten directory /qt/tmp/. That file is deleted by Qt
+      // immediately after the drop event returns, so any later (possibly
+      // asynchronous) file open fails with "Error opening the input file".
+      // Copy the file into the persistent /data/ directory so it stays valid
+      // even when the user has to pick the file type asynchronously.
+      // Only copy paths under /qt/tmp/; normal (already persistent) paths are
+      // left untouched.
+      if (fileName.startsWith("/qt/tmp/"))
+      {
+        QDir().mkpath("/data");
+        const auto targetName = "/data/" + QFileInfo(fileName).fileName();
+        if (QFile::exists(fileName))
+        {
+          if (QFile::exists(targetName))
+            QFile::remove(targetName);
+          if (QFile::copy(fileName, targetName))
+            fileName = targetName;
+          else
+            qWarning() << "[Wasm] Failed to copy dropped file to /data/:" << fileName;
+        }
+      }
+#endif
       fileList.append(fileName);
     }
     event->acceptProposedAction();
