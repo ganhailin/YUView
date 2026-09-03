@@ -41,6 +41,10 @@
 #include <QTextBrowser>
 #include <QTextStream>
 
+#ifdef Q_OS_WASM
+#include <emscripten/val.h>
+#endif
+
 #include <common/Functions.h>
 #include <common/FunctionsGui.h>
 #include <playlistitem/playlistItems.h>
@@ -522,6 +526,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
   ui.playbackController->pausePlayback();
 
   QSettings settings;
+#ifndef Q_OS_WASM
+  // On WebAssembly QMessageBox::question() uses exec(), which is not supported
+  // without asyncify (it hits qFatal). Skip the "save on exit" prompt there;
+  // browser tabs are typically closed directly anyway.
   if (!ui.playlistTreeWidget->getIsSaved() && settings.value("AskToSaveOnExit", true).toBool())
   {
     QMessageBox::StandardButton resBtn =
@@ -538,6 +546,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     else if (resBtn == QMessageBox::Save)
       ui.playlistTreeWidget->savePlaylistToFile();
   }
+#endif
 
   if (saveWindowsStateOnExit)
   {
@@ -1050,6 +1059,31 @@ void MainWindow::resetWindowLayout()
 
 void MainWindow::closeAndClearSettings()
 {
+#ifdef Q_OS_WASM
+  // QMessageBox::question() calls exec() which is not supported on WebAssembly
+  // without asyncify (it hits qFatal in QEventDispatcherWasm). Use the
+  // asynchronous QMessageBox::open() API instead.
+  auto *msgBox = new QMessageBox(QMessageBox::Question,
+                                 "Clear Settings",
+                                 "Do you want to quit YUView and clear all settings?",
+                                 QMessageBox::Yes | QMessageBox::No,
+                                 this);
+  msgBox->setAttribute(Qt::WA_DeleteOnClose);
+  QObject::connect(msgBox, &QMessageBox::finished, this, [this](int result) {
+    if (result == QMessageBox::Yes)
+    {
+      QSettings settings;
+      settings.clear();
+      saveWindowsStateOnExit = false;
+
+      // On WebAssembly a browser tab cannot "quit" the application: calling
+      // close() (or QCoreApplication::exit()) hits qFatal() without asyncify.
+      // Reload the page instead, which restarts the app with cleared settings.
+      emscripten::val::global("location").call<void>("reload");
+    }
+  });
+  msgBox->open();
+#else
   QMessageBox::StandardButton resBtn = QMessageBox::question(
       this, "Clear Settings", "Do you want to quit YUView and clear all settings?");
   if (resBtn == QMessageBox::No)
@@ -1060,6 +1094,7 @@ void MainWindow::closeAndClearSettings()
 
   saveWindowsStateOnExit = false;
   close();
+#endif
 }
 
 void MainWindow::performanceTest()
