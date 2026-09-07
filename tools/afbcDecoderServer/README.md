@@ -76,13 +76,11 @@ X-Afbc-Height: 1080
 X-Afbc-Mode: r8g8b8
 ```
 
-`X-Afbc-Mode` is exactly the mode already produced by YUView: `r<rBits>g<gBits>b<bBits>[a<aBits>][_<yuvTf>_<splitMode>_<yoffset>_<layout>]`. Component bit depths are limited to `8`, `10`, `12`, `16`, `24`, or `32`; `yuvTf` and `splitMode` must be `0` or `1`; `yoffset` is `0` through `15`; and `layout` is `0` through `6`.
+`X-Afbc-Mode` is exactly the mode already produced by YUView: `r<rBits>g<gBits>b<bBits>[a<aBits>][_<yuvTf>_<splitMode>_<yoffset>_<layout>]`. Component bit depths are limited to `8`, `10`, `12`, `16`, `24`, or `32` (alpha also accepts `2` and `4`, e.g. `r10g10b10a2` for AB30); `yuvTf` and `splitMode` must be `0` or `1`; `yoffset` is `0` through `15`; and `layout` is `0` through `6`.
 
-A successful response is `200 application/octet-stream`; its body is the raster data. Its length must be exactly:
+A successful response is `200 application/octet-stream`; its body is the raster data. The client validates the exact raster length with its own `bytesPerFrame()` — the server only enforces an upper bound (`AFBC_MAX_OUTPUT_BYTES`) because packed formats such as AB30 (4 bytes/pixel) do not match a naive `sum(ceil(bits/8))` computation.
 
-$$width \times height \times \sum_{components}{\lceil bits / 8 \rceil}$$
-
-Failures have a short JSON body such as `{"code":"decode_failed"}`. Decoder stderr, local file paths, and commands are intentionally not sent to clients.
+Failures have a short JSON body such as `{"code":"decode_failed"}`. Decoder stderr, local file paths, and commands are intentionally not sent to clients. When a request fails before its body is fully consumed (e.g. an invalid header), the connection is closed so unread body bytes are never misparsed as the next HTTP request line.
 
 ## Safety properties
 
@@ -92,7 +90,7 @@ Failures have a short JSON body such as `{"code":"decode_failed"}`. Decoder stde
 - Restricts compressed input, dimensions, pixel count, and expected raster output size.
 - Enforces a decoder timeout and kills the decoder process group on timeout.
 - Caps concurrent decoder processes.
-- Verifies the decoder exit code and exact output size before returning bytes.
+- Verifies the decoder exit code and output-size upper bound before returning bytes.
 
 Run it under a dedicated unprivileged system account. Put HTTPS and internal-network access control in a reverse proxy if it is not loopback-only.
 

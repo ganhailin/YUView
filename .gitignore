@@ -26,7 +26,7 @@ issues
 /afbcdec_linux_static
 
 # AFBC test sample data
-/1280x720_AB24_AFBC.bin
+*.bin
 
 # googletest-qmake build artifacts
 /submodules/googletest-qmake/build/

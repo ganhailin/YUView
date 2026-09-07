@@ -33,7 +33,7 @@ LOG = logging.getLogger("afbc-decoder-server")
 MODE_PATTERN: Final = re.compile(
 	r"^r(?P<red>8|10|12|16|24|32)g(?P<green>8|10|12|16|24|32)"
 	r"b(?P<blue>8|10|12|16|24|32)"
-	r"(?:a(?P<alpha>8|10|12|16|24|32))?"
+	r"(?:a(?P<alpha>2|4|8|10|12|16|24|32))?"
 	r"(?:_(?P<yuv_tf>[01])_(?P<split_mode>[01])_(?P<yoffset>(?:[0-9]|1[0-5]))"
 	r"_(?P<layout>[0-6]))?$"
 )
@@ -181,17 +181,18 @@ def parse_decode_request(headers, config: Config) -> DecodeRequest:
 	if not match:
 		raise RequestError(HTTPStatus.BAD_REQUEST, "unsupported_mode")
 
-	# This mirrors PixelFormatRGB::bytesPerFrame for the formats accepted by
-	# the command-line decoder: channels use whole-byte storage.
-	component_bits = [int(match.group("red")), int(match.group("green")), int(match.group("blue"))]
-	if match.group("alpha") is not None:
-		component_bits.append(int(match.group("alpha")))
-	bytes_per_pixel = sum((bits + 7) // 8 for bits in component_bits)
-	expected_output_size = width * height * bytes_per_pixel
-	if expected_output_size > config.max_output_bytes:
+	# The exact output size depends on how the decoder packs the format (e.g.
+	# AB30/ABGR2101010 is a 32-bit packed format = 4 bytes/pixel, while the
+	# component bit depths would suggest more). The client validates the output
+	# with its own bytesPerFrame(); here we only enforce an upper bound so an
+	# oversized (or broken) decoder run cannot exhaust memory.
+	if width * height > config.max_output_bytes:
 		raise RequestError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "output_too_large")
 
-	return DecodeRequest(width, height, mode, expected_output_size)
+	# The client rejects payloads that are too large before they are sent, and
+	# the decoder is the authority on what the frame bytes look like. Keep the
+	# output size expectation open-ended (0 means "any size up to the bound").
+	return DecodeRequest(width, height, mode, expected_output_size=0)
 
 
 class AfbcDecoder:
@@ -285,7 +286,14 @@ class AfbcDecoder:
 				output_size = output_path.stat().st_size
 			except FileNotFoundError:
 				raise RequestError(HTTPStatus.UNPROCESSABLE_ENTITY, "decode_failed") from None
-			if output_size != request.expected_output_size:
+			if output_size > self.config.max_output_bytes:
+				LOG.warning("Decoder output %d bytes exceeds the %d byte limit", output_size,
+							self.config.max_output_bytes)
+				raise RequestError(
+					HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+					"output_too_large",
+				)
+			if request.expected_output_size and output_size != request.expected_output_size:
 				LOG.warning("Decoder output had unexpected size %d (expected %d)", output_size,
 							request.expected_output_size)
 				stdout, stderr = self._decoder_log_details(decoder_stdout_path, decoder_stderr_path)
@@ -549,6 +557,11 @@ class DecoderRequestHandler(BaseHTTPRequestHandler):
 		self.send_header("Cache-Control", "no-store")
 		self.end_headers()
 		self.wfile.write(body)
+		# The request body (if any) has not been consumed. If the client used a
+		# keep-alive connection, the unread body bytes would otherwise be parsed
+		# as the next HTTP request line ("Bad request version" / "Bad HTTP/0.9
+		# request type"). Close the connection so the client starts fresh.
+		self.close_connection = True
 
 	def log_message(self, format: str, *args) -> None:
 		LOG.info("%s - %s", self.client_address[0], format % args)

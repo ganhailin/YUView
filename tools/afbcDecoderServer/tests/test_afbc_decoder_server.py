@@ -24,13 +24,24 @@ class ParseDecodeRequestTests(unittest.TestCase):
             self.config,
         )
 
-    def test_rgb8_output_size(self):
+    def test_rgb8_mode_accepted(self):
         request = self.parse(width="2", height="3")
-        self.assertEqual(request.expected_output_size, 18)
+        # The server no longer infers an exact output size: the decoder is the
+        # authority on frame layout (e.g. AB30 is 4 bytes/pixel). expected=0
+        # means "any size up to max_output_bytes"; the client validates the
+        # actual frame size with its own bytesPerFrame().
+        self.assertEqual(request.expected_output_size, 0)
+        self.assertEqual((request.width, request.height), (2, 3))
 
     def test_rgba_with_custom_afbc_options(self):
         request = self.parse("r10g10b10a8_1_0_15_6", "2", "3")
-        self.assertEqual(request.expected_output_size, 42)
+        self.assertEqual(request.mode, "r10g10b10a8_1_0_15_6")
+        self.assertEqual(request.expected_output_size, 0)
+
+    def test_ab30_alpha2_mode_accepted(self):
+        # AB30 = ABGR2101010 (2-bit alpha, 10-bit RGB) -> mode r10g10b10a2.
+        request = self.parse("r10g10b10a2", "3840", "2160")
+        self.assertEqual(request.mode, "r10g10b10a2")
 
     def test_rejects_shell_characters_in_mode(self):
         with self.assertRaises(RequestError) as context:
