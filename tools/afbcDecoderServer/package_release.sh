@@ -49,9 +49,39 @@ else
   echo "Warning: favicon source not found: $FAVICON_SOURCE" >&2
 fi
 
+# Bundle a self-contained Python runtime (python-build-standalone) so the
+# release runs on machines that have no suitable Python (e.g. an old
+# Ubuntu 16.04 with only Python 3.5). These builds require glibc >= 2.17.
+PYTHON_VERSION="${PYTHON_VERSION:-3.10.21}"
+PYTHON_DIST="cpython-${PYTHON_VERSION}+20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20260901/${PYTHON_DIST}"
+PYTHON_DIR="$RELEASE_DIR/python"
+
+# Prefer a locally downloaded tarball so the packaging step works offline.
+PYTHON_TARBALL="${PYTHON_TARBALL:-$HOME/Downloads/$PYTHON_DIST}"
+if [[ -f "$PYTHON_TARBALL" ]]; then
+  echo "Using local embedded Python tarball: $PYTHON_TARBALL"
+else
+  echo "Downloading embedded Python runtime: $PYTHON_DIST"
+  PYTHON_TARBALL="/tmp/$PYTHON_DIST"
+  if ! curl -fL --retry 3 -o "$PYTHON_TARBALL" "$PYTHON_URL"; then
+    echo "Failed to download $PYTHON_URL" >&2
+    exit 1
+  fi
+fi
+
+mkdir -p "$PYTHON_DIR"
+tar -xzf "$PYTHON_TARBALL" -C "$PYTHON_DIR" --strip-components=1
+[[ "$PYTHON_TARBALL" == /tmp/* ]] && rm -f "$PYTHON_TARBALL"
+
+if [[ ! -x "$PYTHON_DIR/bin/python3" ]]; then
+  echo "Embedded Python runtime is broken: $PYTHON_DIR/bin/python3" >&2
+  exit 1
+fi
+echo "Embedded Python runtime ready: $PYTHON_DIR/bin/python3"
+
 install -m 0755 "$SCRIPT_DIR/afbc_decoder_server.py" "$RELEASE_DIR/afbc_decoder_server.py"
 install -m 0755 "$DECODER_BINARY" "$RELEASE_DIR/afbcdec_linux_static"
-
 # Optional self-signed certificate for HTTPS. The multithreaded Qt WASM build
 # needs SharedArrayBuffer, which browsers only enable in a secure context. A
 # plain-HTTP LAN IP is not a secure context, so LAN clients must use HTTPS.
@@ -87,6 +117,11 @@ if [[ -f "$RELEASE_DIR/certs/server.crt" && -f "$RELEASE_DIR/certs/server.key" ]
   export AFBC_TLS_KEY="${AFBC_TLS_KEY:-$RELEASE_DIR/certs/server.key}"
 fi
 
+# Prefer the bundled Python runtime; fall back to a system python3 (which must
+# be new enough for the script, e.g. 3.10+) for development builds.
+if [[ -x "$RELEASE_DIR/python/bin/python3" ]]; then
+  exec "$RELEASE_DIR/python/bin/python3" "$RELEASE_DIR/afbc_decoder_server.py" "$@"
+fi
 exec python3 "$RELEASE_DIR/afbc_decoder_server.py" "$@"
 EOF
 chmod 0755 "$RELEASE_DIR/start.sh"
@@ -116,6 +151,10 @@ https://<server-ip>:8080 (or the corresponding URL).
 The service emits COOP/COEP headers required by the multithreaded Wasm build.
 For production, replace the self-signed cert with a proper one (set AFBC_TLS_CERT
 and AFBC_TLS_KEY) and run this package under an unprivileged account.
+
+The package bundles its own Python runtime in python/ (python-build-standalone,
+glibc >= 2.17), so no Python installation is required on the target machine.
+start.sh automatically uses it.
 EOF
 
 echo "Release package created: $RELEASE_DIR"

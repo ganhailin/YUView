@@ -19,6 +19,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -27,6 +28,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Final
 from urllib.parse import unquote, urlsplit
+
+
+def _app_dir() -> Path:
+	"""Return the directory containing this program's resources.
+
+	When running from a PyInstaller bundle, __file__ points inside the
+	temporary extraction directory, so the resources (decoder binary,
+	WASM release files) are looked up next to the frozen executable
+	instead. In a normal source checkout the resources live next to the
+	script.
+	"""
+	if getattr(sys, "frozen", False):
+		return Path(sys.executable).resolve().parent
+	return Path(__file__).resolve().parent
 
 
 LOG = logging.getLogger("afbc-decoder-server")
@@ -92,10 +107,10 @@ class Config:
 
 	@classmethod
 	def from_environment(cls) -> "Config":
-		# Release/start.sh places the trusted decoder beside this script. An
+		# Release/start.sh places the trusted decoder beside this program. An
 		# administrator can still override it for development or upgrades.
 		decoder_value = os.environ.get(
-			"AFBC_DECODER_PATH", Path(__file__).resolve().parent / "afbcdec_linux_static"
+			"AFBC_DECODER_PATH", _app_dir() / "afbcdec_linux_static"
 		)
 
 		decoder_path = Path(decoder_value).resolve(strict=True)
@@ -112,8 +127,15 @@ class Config:
 		if timeout_seconds <= 0:
 			raise ValueError("AFBC_DECODE_TIMEOUT_SECONDS must be positive")
 
+		if getattr(sys, "frozen", False):
+			# Frozen bundle: the WASM static files sit next to the executable.
+			static_root_default = _app_dir()
+		else:
+			# Source checkout: the WASM static files live in the Release subdir.
+			static_root_default = _app_dir() / "Release"
+
 		static_root = Path(
-			os.environ.get("AFBC_STATIC_ROOT", Path(__file__).resolve().parent / "Release")
+			os.environ.get("AFBC_STATIC_ROOT", static_root_default)
 		).resolve()
 
 		# Optional TLS. When both cert and key are set, the server serves HTTPS.
