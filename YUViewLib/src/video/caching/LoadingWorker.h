@@ -59,12 +59,27 @@ public:
   void processCacheJob();
   void processLoadingJob(bool playing, bool loadRawData);
 
-  // The actual job processing functions. LoadingThread::run() calls these directly on
-  // WebAssembly, where the thread blocks on a QWaitCondition instead of a busy event loop.
-  void processCacheJobInternal();
-  void processLoadingJobInternal(bool playing, bool loadRawData);
 signals:
   void loadingFinished();
+
+#ifdef Q_OS_WASM
+public:
+  // WebAssembly: LoadingThread::run() calls these directly from C++. The loading
+  // threads block on a QWaitCondition instead of running a Qt event loop, so queued
+  // QMetaObject::invokeMethod calls would never be delivered there. They must be
+  // plain (non-slot) public member functions in that build.
+  void processCacheJobInternal();
+  void processLoadingJobInternal(bool playing, bool loadRawData);
+#else
+private slots:
+  // Desktop: processCacheJob()/processLoadingJob() above invoke these by name via
+  // QMetaObject::invokeMethod (queued to the worker's thread), which only resolves
+  // functions that are slots or Q_INVOKABLE. A plain member function is silently
+  // not found, the job never runs, and no frame is ever loaded.
+  void processCacheJobInternal();
+  void processLoadingJobInternal(bool playing, bool loadRawData);
+#endif
+
 private:
   playlistItem *currentCacheItem{};
   int           currentFrame{};
