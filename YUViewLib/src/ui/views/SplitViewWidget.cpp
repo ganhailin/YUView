@@ -166,28 +166,39 @@ void splitViewWidget::updateSettings()
   int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
   if (rendererIdx < 0)
   {
-    // Migrate from legacy settings
-    bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
-    if (!hdrEnabled)
-      rendererIdx = 0;
-#ifdef Q_OS_WIN
-    else if (settings.value("View/UseDXGIMode", true).toBool())
-      rendererIdx = 2;
-    else
+#ifdef Q_OS_WASM
+    // Prefer WebGL 2 for a fresh browser profile. Existing explicit legacy
+    // settings are still migrated below instead of being overwritten.
+    if (!settings.contains("View/HDRRendering"))
       rendererIdx = 1;
-#elif defined(Q_OS_MAC)
-    else if (settings.value("View/EDRMode", true).toBool())
-      rendererIdx = 2;
     else
-      rendererIdx = 1;
-#else
-    else
-      rendererIdx = 1;
 #endif
+    {
+      // Migrate from legacy settings
+      bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+      if (!hdrEnabled)
+        rendererIdx = 0;
+#ifdef Q_OS_WIN
+      else if (settings.value("View/UseDXGIMode", true).toBool())
+        rendererIdx = 2;
+      else
+        rendererIdx = 1;
+#elif defined(Q_OS_MAC)
+      else if (settings.value("View/EDRMode", true).toBool())
+        rendererIdx = 2;
+      else
+        rendererIdx = 1;
+#else
+      else
+        rendererIdx = 1;
+#endif
+    }
   }
 
-  // Guard: if OpenGL 3.3 is not supported, don't use the OpenGL path.
-  if (rendererIdx == 1 && !settings.value("System/GL33Supported", true).toBool())
+  // Guard: desktop requires OpenGL 3.3; Wasm requires WebGL 2.
+  if (rendererIdx == 1 &&
+      !settings.value("System/OpenGLRendererSupported",
+                      settings.value("System/GL33Supported", true)).toBool())
     rendererIdx = 0;
 
   RendererMode mode = RendererMode::Software;
@@ -325,10 +336,17 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
     // Also create OpenGL OpenGLRenderer as fallback
     if (!glRenderer)
     {
+#ifdef Q_OS_WASM
+      glRenderer = new video::OpenGLRenderer();
+      glRendererContainer = QWidget::createWindowContainer(glRenderer, this);
+      glRendererContainer->setGeometry(0, 0, width(), height());
+      glRendererContainer->raise();
+#else
       glRenderer = std::make_unique<video::OpenGLRenderer>(this);
       glRenderer->setParent(this);
       glRenderer->setGeometry(0, 0, width(), height());
       glRenderer->raise();
+#endif
       glRenderer->setZoom(this->zoomFactor);
       glRenderer->setMoveOffset(this->moveOffset);
       glRenderer->setDiffuseWhiteNits(m_colorDiffuseWhite);
@@ -341,18 +359,41 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
           ditherSettings.value("View/PremultipliedAlpha", true).toBool());
 
       // Forward ACM/HDR status from OpenGL widget to dock
-      connect(glRenderer.get(), &video::OpenGLRenderer::rendererStatusChanged,
+#ifdef Q_OS_WASM
+      auto *glRendererObject = glRenderer.data();
+#else
+      auto *glRendererObject = glRenderer.get();
+#endif
+      connect(glRendererObject, &video::OpenGLRenderer::rendererStatusChanged,
               this, &splitViewWidget::rendererStatusChanged);
+      connect(glRendererObject, &video::OpenGLRenderer::initializationFailed,
+              this, [this](const QString &reason) {
+                qWarning() << "OpenGL renderer unavailable:" << reason;
+                QSettings settings;
+                settings.setValue("System/OpenGLRendererSupported", false);
+                settings.setValue("View/HDRRenderer", 0);
+                setRendererMode(RendererMode::Software);
+              }, Qt::QueuedConnection);
     }
 
     // Show OpenGL widget only when it's the active backend
     if (useOpenGL)
+#ifdef Q_OS_WASM
+      glRendererContainer->show();
+#else
       glRenderer->show();
+#endif
     else
     {
       // Release OpenGL resources when not in GL mode.
+#ifdef Q_OS_WASM
+      delete glRendererContainer;
+      glRendererContainer = nullptr;
+      glRenderer = nullptr;
+#else
       glRenderer->hide();
       glRenderer.reset();
+#endif
     }
   }
   else
@@ -377,8 +418,14 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
 #endif
     if (glRenderer)
     {
+#ifdef Q_OS_WASM
+      delete glRendererContainer;
+      glRendererContainer = nullptr;
+      glRenderer = nullptr;
+#else
       glRenderer->hide();
       glRenderer.reset();
+#endif
     }
     raise();
   }
@@ -399,16 +446,27 @@ bool splitViewWidget::isRendererSupported() const
   if (dxgiRenderer && dxgiRenderer->isHDRActive())
     return true;
 #endif
-  // HDR is supported if we have an OpenGLRenderer and it supports 10-bit output
+  // WebGL uses an SDR canvas but is still a valid high-bit-depth processing
+  // renderer. Desktop keeps the historical 10-bit-output meaning.
+#ifdef Q_OS_WASM
+  return glRenderer && glRenderer->isOperational();
+#else
   return glRenderer && glRenderer->supports10bit();
+#endif
 }
 
 void splitViewWidget::resizeEvent(QResizeEvent *event)
 {
   MoveAndZoomableView::resizeEvent(event);
   // Update HDR widget geometry when SplitView is resized
-  if (glRenderer && glRenderer->isVisible())
+  if (glRenderer
+#ifdef Q_OS_WASM
+      && glRendererContainer && glRendererContainer->isVisible())
+    glRendererContainer->setGeometry(0, 0, width(), height());
+#else
+      && glRenderer->isVisible())
     glRenderer->setGeometry(0, 0, width(), height());
+#endif
 #ifdef Q_OS_MAC
   if (edrRenderer && edrRenderer->isVisible())
     edrRenderer->setGeometry(0, 0, width(), height());
@@ -709,7 +767,11 @@ void splitViewWidget::paintEvent(QPaintEvent *)
 
       if (!useHDRWidget && rendererMode == RendererMode::OpenGL && glRenderer && !waitingForCaching)
       {
+#ifdef Q_OS_WASM
+        glRendererContainer->setGeometry(0, 0, width(), height());
+#else
         glRenderer->setGeometry(0, 0, width(), height());
+#endif
         if (auto frameHandler = item[0]->getFrameHandler())
         {
           video::VideoFrame videoFrame = frameHandler->getCurrentFrameAsVideoFrame();
@@ -722,7 +784,11 @@ void splitViewWidget::paintEvent(QPaintEvent *)
       else if (!useHDRWidget)
       {
         if (glRenderer)
+#ifdef Q_OS_WASM
+          glRendererContainer->hide();
+#else
           glRenderer->hide();
+#endif
       }
 
       // Translate the painter to the position where we want the item to be
@@ -1758,7 +1824,11 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
   {
     // Hide HDR widgets when no items are selected
     if (glRenderer)
+#ifdef Q_OS_WASM
+      glRendererContainer->hide();
+#else
       glRenderer->hide();
+#endif
 #ifdef Q_OS_MAC
     if (edrRenderer)
       edrRenderer->hide();
@@ -1780,7 +1850,11 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
   {
     edrRenderer->show();
     if (glRenderer)
+#ifdef Q_OS_WASM
+      glRendererContainer->hide();
+#else
       glRenderer->hide();
+#endif
   }
   else
   {
@@ -1804,9 +1878,15 @@ void splitViewWidget::currentSelectedItemsChanged(playlistItem *item1, playlistI
   }
 #endif
   if (rendererMode == RendererMode::OpenGL && glRenderer)
+#ifdef Q_OS_WASM
+    glRendererContainer->show();
+  else if (glRendererContainer)
+    glRendererContainer->hide();
+#else
     glRenderer->show();
   else if (glRenderer)
     glRenderer->hide();
+#endif
 
   QSettings settings;
   bool savePositionAndZoomPerItem = settings.value("SavePositionAndZoomPerItem", false).toBool();

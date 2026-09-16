@@ -49,7 +49,11 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
   labelRenderer->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
   m_comboRenderingMode = new QComboBox();
   m_comboRenderingMode->addItem("QPainter");                  // index 0 (Software, always)
+#ifdef Q_OS_WASM
+  m_comboRenderingMode->addItem("WebGL 2");                   // index 1 (OpenGL renderer)
+#else
   m_comboRenderingMode->addItem("OpenGL");                    // index 1 (always)
+#endif
 #ifdef Q_OS_WIN
   m_comboRenderingMode->addItem("NativeDXGI");                // index 2 (Windows)
 #endif
@@ -57,13 +61,15 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
   m_comboRenderingMode->addItem("NativeEDR");                 // index 2 (macOS)
 #endif
 
-  // Disable the OpenGL option if OpenGL 3.3 Core is not supported.
+  // Disable the OpenGL option if the platform renderer is not supported.
   // The combobox index stays stable (OpenGL is always index 1) so saved
   // settings remain valid — the user just can't select it.
   {
     QSettings settings;
-    bool gl33Supported = settings.value("System/GL33Supported", true).toBool();
-    if (!gl33Supported)
+    bool rendererSupported =
+        settings.value("System/OpenGLRendererSupported",
+                       settings.value("System/GL33Supported", true)).toBool();
+    if (!rendererSupported)
     {
       auto *model = qobject_cast<QStandardItemModel *>(m_comboRenderingMode->model());
       if (model)
@@ -72,7 +78,11 @@ RendererSettingsDock::RendererSettingsDock(QWidget *parent)
         if (item)
           item->setEnabled(false);
       }
+#ifdef Q_OS_WASM
+      m_comboRenderingMode->setItemText(1, "WebGL 2 — not supported");
+#else
       m_comboRenderingMode->setItemText(1, "OpenGL — not supported");
+#endif
     }
   }
 
@@ -170,29 +180,40 @@ void RendererSettingsDock::loadSettings()
   int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
   if (rendererIdx < 0)
   {
-    // Migrate from legacy settings
-    bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
-    if (!hdrEnabled)
-      rendererIdx = 0; // Disabled
-#ifdef Q_OS_WIN
-    else if (settings.value("View/UseDXGIMode", true).toBool())
-      rendererIdx = 2; // DXGI
+#ifdef Q_OS_WASM
+    // New browser profiles default to the WebGL 2 renderer. Preserve an
+    // explicit legacy HDRRendering choice when migrating existing settings.
+    if (!settings.contains("View/HDRRendering"))
+      rendererIdx = 1;
     else
-      rendererIdx = 1; // OpenGL
-#elif defined(Q_OS_MAC)
-    else if (settings.value("View/EDRMode", true).toBool())
-      rendererIdx = 2; // EDR
-    else
-      rendererIdx = 1; // OpenGL
-#else
-    else
-      rendererIdx = 1; // OpenGL
 #endif
+    {
+      // Migrate from legacy settings
+      bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+      if (!hdrEnabled)
+        rendererIdx = 0; // Disabled
+#ifdef Q_OS_WIN
+      else if (settings.value("View/UseDXGIMode", true).toBool())
+        rendererIdx = 2; // DXGI
+      else
+        rendererIdx = 1; // OpenGL
+#elif defined(Q_OS_MAC)
+      else if (settings.value("View/EDRMode", true).toBool())
+        rendererIdx = 2; // EDR
+      else
+        rendererIdx = 1; // OpenGL
+#else
+      else
+        rendererIdx = 1; // OpenGL
+#endif
+    }
   }
 
   // If the saved renderer is OpenGL(1) but OpenGL 3.3 is not supported,
   // fall back to Disabled.
-  if (rendererIdx == 1 && !settings.value("System/GL33Supported", true).toBool())
+  if (rendererIdx == 1 &&
+      !settings.value("System/OpenGLRendererSupported",
+                      settings.value("System/GL33Supported", true)).toBool())
     rendererIdx = 0;
 
   m_comboRenderingMode->setCurrentIndex(rendererIdx);

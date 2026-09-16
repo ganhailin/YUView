@@ -82,14 +82,18 @@ YUViewApplication::YUViewApplication(int argc, char *argv[]) : QApplication(argc
     bool gl33Supported = ctx.create() && ctx.format().version() >= qMakePair(3, 3);
     QSettings settings;
     settings.setValue("System/GL33Supported", gl33Supported);
+    settings.setValue("System/OpenGLRendererSupported", gl33Supported);
     if (!gl33Supported)
       qWarning() << "OpenGL 3.3 Core Profile not supported — OpenGL HDR path disabled";
   }
 #else
   {
-    // WebAssembly always uses WebGL, OpenGL 3.3 is not available
+    // The Wasm build requires WebGL 2. The renderer performs the definitive
+    // runtime checks (context version, integer textures and shader linking)
+    // once its QOpenGLWidget context is current.
     QSettings settings;
     settings.setValue("System/GL33Supported", false);
+    settings.setValue("System/OpenGLRendererSupported", true);
   }
 #endif
 

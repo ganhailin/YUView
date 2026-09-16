@@ -196,8 +196,9 @@ void PacketItemModel::setUseColorCoding(bool colorCoding)
   if (useColorCoding == colorCoding)
     return;
 
+  beginResetModel();
   useColorCoding = colorCoding;
-  emit dataChanged(QModelIndex(), QModelIndex(), QVector<int>() << Qt::BackgroundRole);
+  endResetModel();
 }
 
 void PacketItemModel::setShowVideoStreamOnly(bool videoOnly)
@@ -205,8 +206,9 @@ void PacketItemModel::setShowVideoStreamOnly(bool videoOnly)
   if (showVideoOnly == videoOnly)
     return;
 
+  beginResetModel();
   showVideoOnly = videoOnly;
-  emit dataChanged(QModelIndex(), QModelIndex());
+  endResetModel();
 }
 
 /// ------------------- FilterByStreamIndexProxyModel -----------------------------

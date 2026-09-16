@@ -39,8 +39,12 @@
 #include <QMatrix3x3>
 #include <QSurfaceFormat>
 #include <QPainter>
+#ifdef Q_OS_WASM
+#include <QOpenGLPaintDevice>
+#endif
 #include <QSettings>
 #include <QColorSpace>
+#include <QOpenGLContext>
 
 
 namespace video
@@ -49,18 +53,34 @@ namespace video
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
 static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
 
-OpenGLRenderer::OpenGLRenderer(QWidget *parent) : QOpenGLWidget(parent)
+OpenGLRenderer::OpenGLRenderer(QWidget *parent)
+#ifdef Q_OS_WASM
+  : QOpenGLWindow(QOpenGLWindow::NoPartialUpdate)
+#else
+  : QOpenGLWidget(parent)
+#endif
 {
+#ifdef Q_OS_WASM
+  Q_UNUSED(parent);
+#else
   // Disable auto-fill background to prevent Qt from clearing our OpenGL content
   setAutoFillBackground(false);
   setAttribute(Qt::WA_OpaquePaintEvent);
+#endif
 
   QSurfaceFormat format;
+#ifdef Q_OS_WASM
+  // Qt maps an OpenGL ES 3 context to WebGL 2 in WebAssembly builds.
+  format.setRenderableType(QSurfaceFormat::OpenGLES);
+  format.setProfile(QSurfaceFormat::NoProfile);
+  format.setVersion(3, 0);
+#else
   format.setProfile(QSurfaceFormat::CoreProfile);
   format.setVersion(3, 3);
+#endif
 
-#ifdef Q_OS_MAC
-  // macOS: 8-bit color buffers (QOpenGLWidget FBO is always 8-bit on macOS)
+#if defined(Q_OS_MAC) || defined(Q_OS_WASM)
+  // QOpenGLWidget on macOS and the WebGL canvas both use 8-bit color buffers.
   format.setRedBufferSize(8);
   format.setGreenBufferSize(8);
   format.setBlueBufferSize(8);
@@ -75,10 +95,13 @@ OpenGLRenderer::OpenGLRenderer(QWidget *parent) : QOpenGLWidget(parent)
 
   setFormat(format);
 
-  // Create pixel overlay widget
-  m_pixelOverlay = std::make_shared<PixelOverlay>(this);
+  // QOpenGLWindow is used on Wasm because QOpenGLWidget relies on context
+  // sharing, which WebGL does not support. Desktop keeps the QWidget overlay.
+#ifndef Q_OS_WASM
+  m_pixelOverlay = std::make_shared<PixelOverlay>(this, this);
   m_pixelOverlay->setGeometry(0, 0, width(), height());
   m_pixelOverlay->show();
+#endif
 }
 
 OpenGLRenderer::~OpenGLRenderer()
@@ -171,6 +194,16 @@ void OpenGLRenderer::initializeGL()
   const char *version  = reinterpret_cast<const char *>(glGetString(GL_VERSION));
   const char *renderer = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
 
+#ifdef Q_OS_WASM
+  auto *currentContext = QOpenGLContext::currentContext();
+  if (!currentContext || !currentContext->isOpenGLES() ||
+      currentContext->format().version() < qMakePair(3, 0))
+  {
+    failInitialization(QStringLiteral("WebGL 2 / OpenGL ES 3.0 context is required"));
+    return;
+  }
+#endif
+
   // Check actual buffer bit depth
   // Note: On macOS, QOpenGLWidget uses an internal FBO. The default framebuffer
   // queries (GL_RED_BITS, etc.) may return garbage values if the FBO isn't properly
@@ -209,35 +242,104 @@ void OpenGLRenderer::initializeGL()
   }
 
 
+#ifdef Q_OS_WASM
+  m_openglInfo = QString("WebGL 2 (%1), Renderer: %2, SDR canvas")
+                     .arg(version, renderer);
+#else
   m_openglInfo = QString("OpenGL %1, Renderer: %2, %3-bit")
                      .arg(version, renderer)
                      .arg(m_bitDepth);
+#endif
 
   qInfo() << "OpenGLRenderer:" << m_openglInfo;
 
-  initShaders();
+  if (!validateRequiredFeatures() || !initShaders())
+    return;
   initGeometry();
   QSettings settings;
   QColor backgroundColor = settings.value("View/BackgroundColor", QColor(140, 140, 140)).value<QColor>();
   glClearColor(backgroundColor.redF(), backgroundColor.greenF(), backgroundColor.blueF(), 1.0f);
 
   m_initialized = true;
+  m_operational = true;
+#ifdef Q_OS_WASM
+  QSettings().setValue("System/OpenGLRendererSupported", true);
+#endif
 }
 
-void OpenGLRenderer::initShaders()
+bool OpenGLRenderer::initShaders()
 {
+#ifdef Q_OS_WASM
+  const QString vertexShader = QStringLiteral(":/shaders/webgl2_vertex.glsl");
+  const QString fragmentShader = QStringLiteral(":/shaders/webgl2_fragment.glsl");
+  const QString ditherShader = QStringLiteral(":/shaders/webgl2_fragment_dither.glsl");
+#else
+  const QString vertexShader = QStringLiteral(":/shaders/opengl_vertex.glsl");
+  const QString fragmentShader = QStringLiteral(":/shaders/opengl_fragment.glsl");
+  const QString ditherShader = QStringLiteral(":/shaders/opengl_fragment_dither.glsl");
+#endif
+
   m_program = std::make_shared<QOpenGLShaderProgram>(this);
-  m_program->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/opengl_vertex.glsl");
-  m_program->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/shaders/opengl_fragment.glsl");
-  if (!m_program->link())
-    qWarning() << "OpenGLRenderer: Standard shader link error:" << m_program->log();
+  if (!m_program->addShaderFromSourceFile(QOpenGLShader::Vertex, vertexShader) ||
+      !m_program->addShaderFromSourceFile(QOpenGLShader::Fragment, fragmentShader) ||
+      !m_program->link())
+  {
+    failInitialization(QStringLiteral("standard shader failed: %1").arg(m_program->log()));
+    return false;
+  }
 
   m_programDither = std::make_shared<QOpenGLShaderProgram>(this);
-  m_programDither->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/shaders/opengl_vertex.glsl");
-  m_programDither->addShaderFromSourceFile(QOpenGLShader::Fragment,
-                                           ":/shaders/opengl_fragment_dither.glsl");
-  if (!m_programDither->link())
-    qWarning() << "OpenGLRenderer: Dither shader link error:" << m_programDither->log();
+  if (!m_programDither->addShaderFromSourceFile(QOpenGLShader::Vertex, vertexShader) ||
+      !m_programDither->addShaderFromSourceFile(QOpenGLShader::Fragment, ditherShader) ||
+      !m_programDither->link())
+  {
+    failInitialization(QStringLiteral("dither shader failed: %1").arg(m_programDither->log()));
+    return false;
+  }
+
+  return true;
+}
+
+bool OpenGLRenderer::validateRequiredFeatures()
+{
+  // RGBA16UI + usampler2D is the key feature used by the high-bit-depth path.
+  // It is core in OpenGL 3.0 / OpenGL ES 3.0 / WebGL 2, but probing it gives
+  // us a reliable runtime failure path for restricted browser/GPU setups.
+  // Discard a bounded number of stale errors so a broken context cannot hang
+  // the UI while performing the capability probe.
+  for (int i = 0; i < 16 && glGetError() != GL_NO_ERROR; ++i) {}
+
+  GLuint probeTexture = 0;
+  const GLushort probePixel[4] = {0, 0, 0, 65535};
+  glGenTextures(1, &probeTexture);
+  glBindTexture(GL_TEXTURE_2D, probeTexture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16UI, 1, 1, 0,
+               GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, probePixel);
+  const GLenum error = glGetError();
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glDeleteTextures(1, &probeTexture);
+
+  if (error != GL_NO_ERROR)
+  {
+    failInitialization(QStringLiteral("RGBA16UI integer textures are unavailable (GL error 0x%1)")
+                           .arg(static_cast<unsigned>(error), 0, 16));
+    return false;
+  }
+  return true;
+}
+
+void OpenGLRenderer::failInitialization(const QString &reason)
+{
+  m_operational = false;
+  m_initialized = false;
+  m_openglInfo = reason;
+  qWarning() << "OpenGLRenderer:" << reason;
+#ifdef Q_OS_WASM
+  QSettings().setValue("System/OpenGLRendererSupported", false);
+#endif
+  emit initializationFailed(reason);
 
 }
 
@@ -361,6 +463,8 @@ void OpenGLRenderer::resizeGL(int w, int h)
 
 void OpenGLRenderer::paintGL()
 {
+  if (!m_operational)
+    return;
   // Bind the correct framebuffer (QOpenGLWidget uses an internal FBO)
   glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
 
@@ -538,7 +642,8 @@ void OpenGLRenderer::paintGL()
   // Shader manually does sRGB OETF (GL_FRAMEBUFFER_SRGB is not used due to
   // Qt NSView backing store double-encode issue).
   // Reinhard tonemapping only for HDR content (PQ/HLG).
-  bool isHDREOTF = (m_eotf == video::RendererEOTF::PQ || m_eotf == video::RendererEOTF::HLG);
+  const bool isHDREOTF =
+      (scc.eotf == video::RendererEOTF::PQ || scc.eotf == video::RendererEOTF::HLG);
   glUniform1f(currentProgram->uniformLocation("systemHandlesTonemapping"), isHDREOTF ? 0.0f : 1.0f);
   glUniform1f(currentProgram->uniformLocation("applySRGBOETF"), 1.0f);
   glUniform1i(currentProgram->uniformLocation("premultipliedAlpha"), m_premultipliedAlpha ? 1 : 0);
@@ -547,6 +652,22 @@ void OpenGLRenderer::paintGL()
 
   m_vao.release();
   currentProgram->release();
+
+#ifdef Q_OS_WASM
+  // QOpenGLWidget's QWidget overlay is unavailable on WebAssembly because
+  // the renderer uses QOpenGLWindow (WebGL has no context sharing). Paint the
+  // zoom indicator, coordinates and pixel values into the same WebGL surface.
+  const qreal pixelRatio = devicePixelRatio();
+  QOpenGLPaintDevice overlayDevice(
+      QSize(qRound(width() * pixelRatio), qRound(height() * pixelRatio)));
+  overlayDevice.setDevicePixelRatio(pixelRatio);
+  QPainter overlayPainter(&overlayDevice);
+  overlayPainter.setRenderHint(QPainter::Antialiasing, false);
+  drawPixelValues(&overlayPainter);
+  drawZoomIndicator(&overlayPainter);
+  drawPixelRulers(&overlayPainter);
+  overlayPainter.end();
+#endif
 
   // Ensure rendering completes
   glFinish();
@@ -834,8 +955,8 @@ void OpenGLRenderer::drawPixelRulers(QPainter *painter)
 }
 
 // PixelOverlay implementation
-OpenGLRenderer::PixelOverlay::PixelOverlay(OpenGLRenderer *parent)
-  : QWidget(parent), hdrWidget(parent)
+OpenGLRenderer::PixelOverlay::PixelOverlay(OpenGLRenderer *renderer, QWidget *parent)
+  : QWidget(parent), hdrWidget(renderer)
 {
   setAttribute(Qt::WA_TransparentForMouseEvents);
   setAttribute(Qt::WA_TranslucentBackground);

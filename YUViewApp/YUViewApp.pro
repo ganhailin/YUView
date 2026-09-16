@@ -9,6 +9,12 @@ TEMPLATE = app
 CONFIG += c++17
 CONFIG -= debug_and_release
 
+wasm {
+    # The renderer relies on ES 3 integer textures/usampler2D, which map to
+    # WebGL 2. Requiring version 2 avoids silently creating a WebGL 1 context.
+    QMAKE_LFLAGS += -s MIN_WEBGL_VERSION=2 -s MAX_WEBGL_VERSION=2
+}
+
 SOURCES += $$files(src/*.cpp, false)
 HEADERS += $$files(src/*.h, false)
 

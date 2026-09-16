@@ -3,5 +3,8 @@
         <file>opengl_vertex.glsl</file>
         <file>opengl_fragment.glsl</file>
         <file>opengl_fragment_dither.glsl</file>
+        <file>webgl2_vertex.glsl</file>
+        <file>webgl2_fragment.glsl</file>
+        <file>webgl2_fragment_dither.glsl</file>
     </qresource>
 </RCC>

@@ -39,7 +39,11 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <memory>
+#ifdef Q_OS_WASM
+#include <QOpenGLWindow>
+#else
 #include <QOpenGLWidget>
+#endif
 #include <QWidget>
 
 namespace video
@@ -52,7 +56,13 @@ class FrameHandler;
 using RendererEOTF       = color::EOTF;
 using RendererColorGamut = color::ColorGamut;
 
-class OpenGLRenderer : public QOpenGLWidget, protected QOpenGLFunctions
+#ifdef Q_OS_WASM
+using OpenGLRendererSurface = QOpenGLWindow;
+#else
+using OpenGLRendererSurface = QOpenGLWidget;
+#endif
+
+class OpenGLRenderer : public OpenGLRendererSurface, protected QOpenGLFunctions
 {
   Q_OBJECT
 
@@ -83,6 +93,7 @@ public:
 
   // State query
   bool supports10bit() const { return m_supports10bit; }
+  bool isOperational() const { return m_operational; }
   QString getOpenGLInfo() const { return m_openglInfo; }
 
 signals:
@@ -92,6 +103,7 @@ signals:
   /// systemHandlesTonemapping is true when ACM is active.
   void rendererStatusChanged(bool hdrActive, bool systemHandlesTonemapping,
                         float maxNits, float sdrWhiteNits);
+  void initializationFailed(const QString &reason);
 
 protected:
   void initializeGL() override;
@@ -103,15 +115,17 @@ protected:
   void drawPixelRulers(QPainter *painter);
 
 private:
-  void initShaders();
+  bool initShaders();
   void initGeometry();
   void updateTexture();
+  bool validateRequiredFeatures();
+  void failInitialization(const QString &reason);
 
   // Pixel overlay widget for drawing pixel values
   class PixelOverlay : public QWidget
   {
   public:
-    explicit PixelOverlay(OpenGLRenderer *parent);
+    PixelOverlay(OpenGLRenderer *renderer, QWidget *parent);
     void paintEvent(QPaintEvent *event) override;
 
   private:
@@ -134,6 +148,7 @@ private:
   int  m_sourceBitDepth{8};      // Source bit depth (for pixel value display)
   bool m_ditheringEnabled{false};
   bool m_initialized{false};
+  bool m_operational{false};
   bool m_supports10bit{false};
   bool m_showRawData{false};
 

@@ -311,7 +311,12 @@ protected:
 
   // renderer
   RendererMode                      rendererMode{RendererMode::Software};
+#ifdef Q_OS_WASM
+  QPointer<video::OpenGLRenderer>   glRenderer;
+  QWidget                          *glRendererContainer{nullptr};
+#else
   std::unique_ptr<video::OpenGLRenderer>   glRenderer;
+#endif
 
   // Color processing parameters (cross-platform, used by both OpenGL and Metal paths)
   // Note: EOTF, ColorGamut, and Gamma are now per-image (FrameHandler::SourceColorConfig).

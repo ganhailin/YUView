@@ -68,6 +68,23 @@ docker run --rm -v $(pwd):/app yuv-wasm-builder \
 
 ## 三、部署到浏览器
 
+### WebGL 2 要求与回退
+
+Wasm 版 GPU 渲染器使用 **WebGL 2 / OpenGL ES 3.0**。这是因为 10/12/16-bit
+输入帧通过 `RGBA16UI` 整数纹理和 `usampler2D` 传给 shader，WebGL 1 不支持这条
+通路。Wasm 构建会启用 WebGL 2，并使用独立的 GLSL ES 3.00 shader。
+
+Wasm 端通过 `QOpenGLWindow` 承载渲染表面，而不是桌面端使用的 `QOpenGLWidget`。
+后者依赖 OpenGL context sharing，而 WebGL 不支持该机制；直接使用会在 Qt 合成窗口时
+造成 context lost。窗口容器负责把 WebGL 表面嵌入原有 QWidget 布局。
+
+创建渲染器时还会实际检测 WebGL 2 上下文、`RGBA16UI` 上传以及 shader 编译/链接。
+任一检测失败时，应用会记录原因、禁用 WebGL 选项并自动回退到 QPainter，不会留下
+空白渲染窗口。
+
+HDR 的 PQ/HLG 解码、色域转换、Reinhard tone mapping 和抖动均在 WebGL shader 中
+执行；浏览器 canvas 当前仍按 8-bit SDR 输出，而不是原生 HDR canvas。
+
 ### 1. 生成 HTML 加载器
 
 使用 Qt 的 `wasmdeployqt` 工具生成 HTML 页面和辅助文件：
