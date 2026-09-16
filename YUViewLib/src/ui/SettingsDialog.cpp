@@ -209,29 +209,45 @@ void SettingsDialog::on_checkBoxEnablePlaybackCaching_stateChanged(int state)
 
 void SettingsDialog::on_pushButtonEditViewBackgroundColor_clicked()
 {
-  QColor currentColor = ui.viewBackgroundColor->getPlainColor();
-  QColor newColor     = QColorDialog::getColor(
-      currentColor, this, tr("Select Color"), QColorDialog::ShowAlphaChannel);
-  if (newColor.isValid() && currentColor != newColor)
-    ui.viewBackgroundColor->setPlainColor(newColor);
+  editColor(ui.viewBackgroundColor);
 }
 
 void SettingsDialog::on_pushButtonEditViewGridLineColor_clicked()
 {
-  QColor currentColor = ui.viewGridLineColor->getPlainColor();
-  QColor newColor     = QColorDialog::getColor(
-      currentColor, this, tr("Select Color"), QColorDialog::ShowAlphaChannel);
-  if (newColor.isValid() && currentColor != newColor)
-    ui.viewGridLineColor->setPlainColor(newColor);
+  editColor(ui.viewGridLineColor);
 }
 
 void SettingsDialog::on_pushButtonEditPlotBackgroundColor_clicked()
 {
-  QColor currentColor = ui.plotBackgroundColor->getPlainColor();
-  QColor newColor     = QColorDialog::getColor(
+  editColor(ui.plotBackgroundColor);
+}
+
+void SettingsDialog::editColor(ShowColorWidget *colorWidget)
+{
+  const QColor currentColor = colorWidget->getPlainColor();
+
+#ifdef Q_OS_WASM
+  // QColorDialog::getColor() starts a nested event loop through exec(), which
+  // is unavailable in the non-Asyncify Wasm build. Keep the dialog and result
+  // handling asynchronous instead.
+  auto *colorDialog = new QColorDialog(currentColor, this);
+  colorDialog->setWindowTitle(tr("Select Color"));
+  colorDialog->setOption(QColorDialog::ShowAlphaChannel);
+  colorDialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(colorDialog,
+          &QColorDialog::colorSelected,
+          this,
+          [colorWidget, currentColor](const QColor &newColor) {
+            if (newColor.isValid() && currentColor != newColor)
+              colorWidget->setPlainColor(newColor);
+          });
+  colorDialog->open();
+#else
+  const QColor newColor = QColorDialog::getColor(
       currentColor, this, tr("Select Color"), QColorDialog::ShowAlphaChannel);
   if (newColor.isValid() && currentColor != newColor)
-    ui.plotBackgroundColor->setPlainColor(newColor);
+    colorWidget->setPlainColor(newColor);
+#endif
 }
 
 void SettingsDialog::on_pushButtonDecoderSelectPath_clicked()

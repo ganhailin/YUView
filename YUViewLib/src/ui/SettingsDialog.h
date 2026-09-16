@@ -88,6 +88,8 @@ private slots:
   void on_pushButtonCancel_clicked() { reject(); }
 
 private:
+  void editColor(ShowColorWidget *colorWidget);
+
   // Open a file search dialog and return the selected file (or an empty string if no file was selected)
   QStringList getLibraryPath(QString currentFile, QString caption, bool multipleFiles=false);
 
