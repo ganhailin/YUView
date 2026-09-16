@@ -338,6 +338,7 @@ void splitViewWidget::setRendererMode(RendererMode mode, bool callUpdate)
     {
 #ifdef Q_OS_WASM
       glRenderer = new video::OpenGLRenderer();
+      glRenderer->installEventFilter(this);
       glRendererContainer = QWidget::createWindowContainer(glRenderer, this);
       glRendererContainer->setGeometry(0, 0, width(), height());
       glRendererContainer->raise();
@@ -1441,6 +1442,41 @@ void splitViewWidget::wheelEvent(QWheelEvent *event)
   if (!isViewFrozen)
     MoveAndZoomableView::wheelEvent(event);
 }
+
+#ifdef Q_OS_WASM
+bool splitViewWidget::eventFilter(QObject *watched, QEvent *event)
+{
+  // A QWindow embedded through createWindowContainer receives pointer events
+  // before its QWidget parent. Forward them synchronously so the existing
+  // panning, zooming and split-line interaction logic remains the single
+  // source of truth.
+  if (glRenderer && watched == glRenderer.data())
+  {
+    switch (event->type())
+    {
+      case QEvent::MouseButtonPress:
+        mousePressEvent(static_cast<QMouseEvent *>(event));
+        return true;
+      case QEvent::MouseMove:
+        mouseMoveEvent(static_cast<QMouseEvent *>(event));
+        return true;
+      case QEvent::MouseButtonRelease:
+        mouseReleaseEvent(static_cast<QMouseEvent *>(event));
+        return true;
+      case QEvent::MouseButtonDblClick:
+        mouseDoubleClickEvent(static_cast<QMouseEvent *>(event));
+        return true;
+      case QEvent::Wheel:
+        wheelEvent(static_cast<QWheelEvent *>(event));
+        return true;
+      default:
+        break;
+    }
+  }
+
+  return MoveAndZoomableView::eventFilter(watched, event);
+}
+#endif
 
 void splitViewWidget::setMoveOffset(QPointF offset)
 {

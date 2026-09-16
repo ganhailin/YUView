@@ -37,6 +37,10 @@
 #include <ui/Mainwindow.h>
 
 #include <QApplication>
+#ifdef Q_OS_WASM
+#include <QDebug>
+#include <QFontDatabase>
+#endif
 #include <QOpenGLContext>
 #include <QSettings>
 #include <QSurfaceFormat>
@@ -56,6 +60,33 @@ YUViewApplication::YUViewApplication(int argc, char *argv[]) : QApplication(argc
   setApplicationVersion(versionString);
   setOrganizationName("Institut für Nachrichtentechnik, RWTH Aachen University");
   setOrganizationDomain("ient.rwth-aachen.de");
+#ifdef Q_OS_WASM
+  // Browser system fonts are not available to Qt/Wasm. Register a bundled
+  // CJK-capable font before creating any widgets so both explicit fonts and
+  // Qt's fallback lookup can render Chinese text.
+  Q_INIT_RESOURCE(fonts);
+  const int wasmFontId = QFontDatabase::addApplicationFont(
+      ":/fonts/WenQuanYiMicroHei-Regular.ttf");
+  const auto wasmFontFamilies = QFontDatabase::applicationFontFamilies(wasmFontId);
+  if (!wasmFontFamilies.isEmpty())
+  {
+    const QString &wasmFontFamily = wasmFontFamilies.constFirst();
+    QFont wasmFont = font();
+    wasmFont.setFamily(wasmFontFamily);
+    setFont(wasmFont);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Han, wasmFontFamily);
+    QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Hiragana, wasmFontFamily);
+    QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Katakana, wasmFontFamily);
+    QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Hangul, wasmFontFamily);
+#endif
+  }
+  else
+  {
+    qWarning() << "Failed to load the bundled Wasm font";
+  }
+#endif
 #ifdef Q_OS_LINUX
 #if QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
   QGuiApplication::setDesktopFileName("YUView");

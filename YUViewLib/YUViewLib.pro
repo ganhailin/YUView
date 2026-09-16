@@ -33,6 +33,12 @@ RESOURCES += \
     docs/docs.qrc \
     shaders/shaders.qrc
 
+wasm {
+    RESOURCES += fonts/fonts.qrc
+}
+
+DISTFILES += fonts/LICENSE-WenQuanYi-Micro-Hei.txt
+
 contains(QT_ARCH, x86_32|i386) {
     warning("You are building for a 32 bit system. This is untested and not supported.")
 }

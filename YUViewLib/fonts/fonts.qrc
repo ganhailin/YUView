@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/fonts">
+        <file alias="WenQuanYiMicroHei-Regular.ttf">WenQuanYiMicroHei-Regular.ttf</file>
+    </qresource>
+</RCC>

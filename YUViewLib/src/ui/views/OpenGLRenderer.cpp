@@ -34,8 +34,10 @@
 #include <video/FrameHandler.h>
 #include <video/yuv/videoHandlerYUV.h>
 #include <common/FunctionsGui.h>
+#include <common/Typedef.h>
 
 #include <QDebug>
+#include <QImage>
 #include <QMatrix3x3>
 #include <QSurfaceFormat>
 #include <QPainter>
@@ -51,7 +53,7 @@ namespace video
 {
 
 // Threshold for showing pixel values (same as SPLITVIEW_DRAW_VALUES_ZOOMFACTOR)
-static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = 4.0;
+static const double SHOW_PIXEL_VALUES_ZOOM_THRESHOLD = SPLITVIEW_DRAW_VALUES_ZOOMFACTOR;
 
 OpenGLRenderer::OpenGLRenderer(QWidget *parent)
 #ifdef Q_OS_WASM
@@ -654,19 +656,35 @@ void OpenGLRenderer::paintGL()
   currentProgram->release();
 
 #ifdef Q_OS_WASM
-  // QOpenGLWidget's QWidget overlay is unavailable on WebAssembly because
-  // the renderer uses QOpenGLWindow (WebGL has no context sharing). Paint the
-  // zoom indicator, coordinates and pixel values into the same WebGL surface.
-  const qreal pixelRatio = devicePixelRatio();
-  QOpenGLPaintDevice overlayDevice(
-      QSize(qRound(width() * pixelRatio), qRound(height() * pixelRatio)));
-  overlayDevice.setDevicePixelRatio(pixelRatio);
-  QPainter overlayPainter(&overlayDevice);
-  overlayPainter.setRenderHint(QPainter::Antialiasing, false);
-  drawPixelValues(&overlayPainter);
-  drawZoomIndicator(&overlayPainter);
-  drawPixelRulers(&overlayPainter);
-  overlayPainter.end();
+  // Rasterize all text on the CPU first. Drawing glyphs directly through the
+  // WebGL paint engine can reuse a stale glyph-atlas binding after the video
+  // integer-texture pass, which produces striped or partially missing text.
+  // Uploading one premultiplied overlay image avoids that shader interaction.
+  const bool needsOverlay =
+      m_zoom != 1.0 || (m_frameHandler && m_zoom >= 32.0) ||
+      (m_showRawData && m_zoom >= SHOW_PIXEL_VALUES_ZOOM_THRESHOLD);
+  if (needsOverlay)
+  {
+    const qreal pixelRatio = devicePixelRatio();
+    QImage overlayImage(
+        QSize(qRound(width() * pixelRatio), qRound(height() * pixelRatio)),
+        QImage::Format_ARGB32_Premultiplied);
+    overlayImage.setDevicePixelRatio(pixelRatio);
+    overlayImage.fill(Qt::transparent);
+
+    QPainter rasterPainter(&overlayImage);
+    rasterPainter.setRenderHint(QPainter::Antialiasing, false);
+    drawPixelValues(&rasterPainter);
+    drawZoomIndicator(&rasterPainter);
+    drawPixelRulers(&rasterPainter);
+    rasterPainter.end();
+
+    QOpenGLPaintDevice overlayDevice(overlayImage.size());
+    overlayDevice.setDevicePixelRatio(pixelRatio);
+    QPainter surfacePainter(&overlayDevice);
+    surfacePainter.drawImage(QPointF(0, 0), overlayImage);
+    surfacePainter.end();
+  }
 #endif
 
   // Ensure rendering completes
@@ -858,7 +876,8 @@ void OpenGLRenderer::drawZoomIndicator(QPainter *painter)
   QString zoomString = QString("x") + QString::number(m_zoom, 'g', (m_zoom < 0.5) ? 4 : 2);
 
   // Set up font
-  QFont font("helvetica", 24);
+  QFont font = painter->font();
+  font.setPointSize(24);
   painter->setRenderHint(QPainter::TextAntialiasing);
   painter->setPen(QColor(Qt::black));
   painter->setFont(font);
@@ -877,7 +896,8 @@ void OpenGLRenderer::drawPixelRulers(QPainter *painter)
     return;
 
   // Set up font for ruler values
-  QFont valueFont("helvetica", 10);
+  QFont valueFont = painter->font();
+  valueFont.setPointSize(10);
   painter->setFont(valueFont);
 
   int widgetW = width();
