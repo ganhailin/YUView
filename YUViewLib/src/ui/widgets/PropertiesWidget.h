@@ -56,7 +56,12 @@ public slots:
   // the stack widget.
   void itemAboutToBeDeleted(playlistItem *item);
 
+protected:
+  bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
+  void installWheelEventFilters(QWidget *propertiesWidget);
+
   QVBoxLayout topLayout;
   QStackedWidget stack;
   QWidget emptyWidget;

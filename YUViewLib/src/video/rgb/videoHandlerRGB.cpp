@@ -417,7 +417,10 @@ void videoHandlerRGB::slotRGBFormatControlChanged(int selectionIndex)
 #ifdef Q_OS_WASM
     auto *dialog = new videoHandlerRGBCustomFormatDialog(this->srcPixelFormat);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    QObject::connect(dialog, &QDialog::accepted, dialog, [this, dialog]() {
+    QObject::connect(dialog,
+                     &QDialog::accepted,
+                     dialog,
+                     [this, dialog, nrBytesOldFormat]() {
       auto fmt = dialog->getSelectedRGBFormat();
       if (fmt.isValid() && fmt != this->srcPixelFormat) {
         this->setSrcPixelFormat(fmt);
@@ -436,8 +439,11 @@ void videoHandlerRGB::slotRGBFormatControlChanged(int selectionIndex)
             this->ui.rgbFormatComboBox->setCurrentIndex(static_cast<int>(*idx));
           }
         }
-        // Trigger redraw
+        // Trigger redraw. If the number of bytes per frame changed, the raw
+        // buffer was loaded using the old format and must be read again.
         this->currentImageIndex = -1;
+        if (nrBytesOldFormat != this->getBytesPerFrame())
+          this->invalidateAllBuffers();
         this->setCacheInvalid();
         emit signalHandlerChanged(true, RECACHE_CLEAR);
       }

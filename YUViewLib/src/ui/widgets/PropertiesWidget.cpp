@@ -34,7 +34,11 @@
 
 #include "playlistitem/playlistItem.h"
 
+#include <QAbstractSpinBox>
+#include <QComboBox>
+#include <QCoreApplication>
 #include <QScrollArea>
+#include <QWheelEvent>
 
 /* The file info group box can display information on a file (or any other display object).
  * If you provide a list of QString tuples, this class will fill a grid layout with the
@@ -89,6 +93,10 @@ void PropertiesWidget::currentSelectedItemsChanged(playlistItem *item1, playlist
       existingScroll = scrollArea;
     }
 
+    // Keep wheel scrolling on the properties panel instead of changing the
+    // value of a combo box or spin box under the mouse pointer.
+    installWheelEventFilters(propertiesWidget);
+
     stack.setCurrentWidget(existingScroll);
   }
   else
@@ -96,6 +104,38 @@ void PropertiesWidget::currentSelectedItemsChanged(playlistItem *item1, playlist
     // Show the empty widget
     stack.setCurrentWidget(&emptyWidget);
   }
+}
+
+void PropertiesWidget::installWheelEventFilters(QWidget *propertiesWidget)
+{
+  const auto comboBoxes = propertiesWidget->findChildren<QComboBox *>();
+  for (auto *comboBox : comboBoxes)
+    comboBox->installEventFilter(this);
+
+  const auto spinBoxes = propertiesWidget->findChildren<QAbstractSpinBox *>();
+  for (auto *spinBox : spinBoxes)
+    spinBox->installEventFilter(this);
+}
+
+bool PropertiesWidget::eventFilter(QObject *watched, QEvent *event)
+{
+  if (event->type() != QEvent::Wheel ||
+      (!qobject_cast<QComboBox *>(watched) && !qobject_cast<QAbstractSpinBox *>(watched)))
+    return QWidget::eventFilter(watched, event);
+
+  auto *widget = qobject_cast<QWidget *>(watched);
+  for (QWidget *parent = widget ? widget->parentWidget() : nullptr; parent; parent = parent->parentWidget())
+  {
+    if (auto *scrollArea = qobject_cast<QScrollArea *>(parent))
+    {
+      // Forward the original event synchronously. QAbstractScrollArea only
+      // needs its deltas/modifiers, so the control-local position is irrelevant.
+      QCoreApplication::sendEvent(scrollArea->viewport(), event);
+      return true;
+    }
+  }
+
+  return QWidget::eventFilter(watched, event);
 }
 
 void PropertiesWidget::itemAboutToBeDeleted(playlistItem *item)
