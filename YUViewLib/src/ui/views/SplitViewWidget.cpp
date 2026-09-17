@@ -161,38 +161,30 @@ void splitViewWidget::updateSettings()
   // longer used for global renderer configuration.
 
   // Load renderer mode from settings.
-  // View/HDRRenderer is a combobox index: 0=Disabled, 1=OpenGL,
+  // View/HDRRenderer is a combobox index: 0=QPainter, 1=OpenGL,
   // 2=DXGI (Windows) or EDR (macOS).
   int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
   if (rendererIdx < 0)
   {
-#ifdef Q_OS_WASM
-    // Prefer WebGL 2 for a fresh browser profile. Existing explicit legacy
-    // settings are still migrated below instead of being overwritten.
-    if (!settings.contains("View/HDRRendering"))
-      rendererIdx = 1;
-    else
-#endif
-    {
-      // Migrate from legacy settings
-      bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
-      if (!hdrEnabled)
-        rendererIdx = 0;
+    // Migrate from legacy settings. With no saved setting, the legacy value
+    // defaults to false and selects the QPainter software renderer.
+    bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+    if (!hdrEnabled)
+      rendererIdx = 0;
 #ifdef Q_OS_WIN
-      else if (settings.value("View/UseDXGIMode", true).toBool())
-        rendererIdx = 2;
-      else
-        rendererIdx = 1;
+    else if (settings.value("View/UseDXGIMode", true).toBool())
+      rendererIdx = 2;
+    else
+      rendererIdx = 1;
 #elif defined(Q_OS_MAC)
-      else if (settings.value("View/EDRMode", true).toBool())
-        rendererIdx = 2;
-      else
-        rendererIdx = 1;
+    else if (settings.value("View/EDRMode", true).toBool())
+      rendererIdx = 2;
+    else
+      rendererIdx = 1;
 #else
-      else
-        rendererIdx = 1;
+    else
+      rendererIdx = 1;
 #endif
-    }
   }
 
   // Guard: desktop requires OpenGL 3.3; Wasm requires WebGL 2.

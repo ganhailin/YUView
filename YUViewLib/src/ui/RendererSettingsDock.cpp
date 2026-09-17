@@ -180,37 +180,29 @@ void RendererSettingsDock::loadSettings()
   int rendererIdx = settings.value("View/HDRRenderer", -1).toInt();
   if (rendererIdx < 0)
   {
-#ifdef Q_OS_WASM
-    // New browser profiles default to the WebGL 2 renderer. Preserve an
-    // explicit legacy HDRRendering choice when migrating existing settings.
-    if (!settings.contains("View/HDRRendering"))
-      rendererIdx = 1;
-    else
-#endif
-    {
-      // Migrate from legacy settings
-      bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
-      if (!hdrEnabled)
-        rendererIdx = 0; // Disabled
+    // Migrate from legacy settings. With no saved setting, the legacy value
+    // defaults to false and selects the QPainter software renderer.
+    bool hdrEnabled = settings.value("View/HDRRendering", false).toBool();
+    if (!hdrEnabled)
+      rendererIdx = 0; // QPainter
 #ifdef Q_OS_WIN
-      else if (settings.value("View/UseDXGIMode", true).toBool())
-        rendererIdx = 2; // DXGI
-      else
-        rendererIdx = 1; // OpenGL
+    else if (settings.value("View/UseDXGIMode", true).toBool())
+      rendererIdx = 2; // DXGI
+    else
+      rendererIdx = 1; // OpenGL
 #elif defined(Q_OS_MAC)
-      else if (settings.value("View/EDRMode", true).toBool())
-        rendererIdx = 2; // EDR
-      else
-        rendererIdx = 1; // OpenGL
+    else if (settings.value("View/EDRMode", true).toBool())
+      rendererIdx = 2; // EDR
+    else
+      rendererIdx = 1; // OpenGL
 #else
-      else
-        rendererIdx = 1; // OpenGL
+    else
+      rendererIdx = 1; // OpenGL
 #endif
-    }
   }
 
   // If the saved renderer is OpenGL(1) but OpenGL 3.3 is not supported,
-  // fall back to Disabled.
+  // fall back to QPainter.
   if (rendererIdx == 1 &&
       !settings.value("System/OpenGLRendererSupported",
                       settings.value("System/GL33Supported", true)).toBool())
